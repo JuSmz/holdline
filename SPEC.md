@@ -2,18 +2,18 @@
 
 > **Answers the call. Books the job. Secures the payment.**
 
-| | |
-|---|---|
-| Status | Draft v0.2 (2026-10-20). Revised after a five-lens review (payments, voice, security, judging, stack). Every finding was checked against the official docs by an adversarial verifier. |
-| Event | PayPal AI Hackathon (Devpost). Submission deadline **2026-11-12 12:00 PST = 21:00 CET**. Our own target is **11-11**. Judging runs until **2026-12-15**. |
-| Environment | PayPal **sandbox only** |
-| Docs checked | 2026-10-20. Sources are in §29. **VERIFY** marks a point that is confirmed in the stage named next to it. |
+|              |                                                                                                                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status       | Draft v0.2 (2026-10-20). Revised after a five-lens review (payments, voice, security, judging, stack). Every finding was checked against the official docs by an adversarial verifier. |
+| Event        | PayPal AI Hackathon (Devpost). Submission deadline **2026-11-12 12:00 PST = 21:00 CET**. Our own target is **11-11**. Judging runs until **2026-12-15**.                               |
+| Environment  | PayPal **sandbox only**                                                                                                                                                                |
+| Docs checked | 2026-10-20. Sources are in §29. **VERIFY** marks a point that is confirmed in the stage named next to it.                                                                              |
 
 ---
 
 ## 1. Product
 
-**Problem.** Small trades businesses (plumbers, electricians, HVAC) miss calls while they are on a job, and every missed call is a lost job. They also lose money to no-shows, late cancellations and unpaid invoices. *(Sourced numbers on missed calls and no-show losses are added in stage 12. Nothing is made up.)*
+**Problem.** Small trades businesses (plumbers, electricians, HVAC) miss calls while they are on a job, and every missed call is a lost job. They also lose money to no-shows, late cancellations and unpaid invoices. _(Sourced numbers on missed calls and no-show losses are added in stage 12. Nothing is made up.)_
 
 **Solution.** Holdline is an AI phone agent for the business:
 
@@ -34,12 +34,12 @@ After the visit, one click in the dashboard captures the payment. Extra work is 
 
 **Primary users**
 
-| User | Role |
-|---|---|
-| Caller | Customer of the trades business. Calls in the browser or by phone, then approves the hold. |
+| User               | Role                                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Caller             | Customer of the trades business. Calls in the browser or by phone, then approves the hold.                     |
 | Owner / dispatcher | Uses the dashboard: calls, bookings, payments, revenue, payouts, and Job done / No-show / Cancel / Extra work. |
-| Technician | Does the job and receives a payout. No app needed; just a PayPal (sandbox) account. |
-| Judge | Uses `/try`. Plays the customer first, then the owner, in a private demo copy. No keys needed. |
+| Technician         | Does the job and receives a payout. No app needed; just a PayPal (sandbox) account.                            |
+| Judge              | Uses `/try`. Plays the customer first, then the owner, in a private demo copy. No keys needed.                 |
 
 ---
 
@@ -61,10 +61,10 @@ After the visit, one click in the dashboard captures the payment. Extra work is 
   - public on YouTube
   - shows the project working as built
   - no third-party trademarks or copyrighted music without permission
-  - Judges *may judge from the text, images and video alone*, so the video carries a lot of the weight.
+  - Judges _may judge from the text, images and video alone_, so the video carries a lot of the weight.
 - **Judging criteria** (equally weighted): technological implementation, design, potential impact, innovation, presentation.
 - **Prize limit:** at most one grand prize or honorable mention, **plus one sponsor prize**.
-  - Honorable mentions that fit: *Best Use of PayPal + AI*, *Best Use of Agentic Commerce*, *Best Demo Delivery*, *Most Impactful*.
+  - Honorable mentions that fit: _Best Use of PayPal + AI_, _Best Use of Agentic Commerce_, _Best Demo Delivery_, _Most Impactful_.
   - **Target sponsor prize: Bryntum** (Scheduler). Bryntum's CEO is a judge.
     - The trial lasts 45 days, so start it **no earlier than 2026-11-01**.
     - Ask Bryntum in the hackathon Discord how the npm trial clock is counted.
@@ -150,7 +150,7 @@ After the visit, one click in the dashboard captures the payment. Extra work is 
 3. A **mic preflight** runs (`getUserMedia`).
    - If it fails, the page offers the chat in one click.
    - If it works, `/try/call` shows a short pre-call form: first name, plus the confirmed email if there is one.
-   - **Call Holdline** asks *our* server to create the web call (§14.3).
+   - **Call Holdline** asks _our_ server to create the web call (§14.3).
 4. The agent greets: "Thanks for calling Northside Plumbing & Electric — this is a Holdline demo line; calls are transcribed, so please use made-up details…"
    - It asks about the problem, urgency and address, and the preferred day and time.
    - It **confirms** the name and email from the form. It does **not** spell the email out or ask for a callback number.
@@ -163,7 +163,7 @@ After the visit, one click in the dashboard captures the payment. Extra work is 
 7. The caller clicks the PayPal button. A popup opens, they log in as the sandbox buyer and approve.
    - The server authorizes the order, and the booking becomes `authorized`.
    - **Within about 2 s, the server makes the agent say a sentence built from the DB:** **"Got it — PayPal confirmed the $149 hold. You're all set for Thursday between 10 and 12, Austin time. Maya will be there."** (§16)
-   - The compact schedule turns the slot from hatched *pending* to solid *confirmed*.
+   - The compact schedule turns the slot from hatched _pending_ to solid _confirmed_.
 8. **Dashboard:**
    - the call with transcript and AI summary
    - the booking timeline
@@ -267,23 +267,23 @@ docs/                    sandbox-report.md, voice-spike-report.md, video-shotlis
 
 Versions are the npm `latest` as of 2026-10-20 and are **pinned exactly** in `package.json`.
 
-| Area | Choice | Version | Notes |
-|---|---|---|---|
-| Runtime | Node.js | **24.21.0** on Render (`.node-version`). `engines: ">=24 <27"` | Locally the user has Node 26. CI runs 24. Switching locally to 24 (e.g. `brew install node@24`) is optional and the user's call. Node 24 runs `.ts` scripts directly (type stripping). |
-| Package manager | pnpm via the `packageManager` field (written by create-next-app) | — | No `corepack enable`: Render's preinstalled pnpm switches to that version by itself. `pnpm-workspace.yaml` with explicit `allowBuilds` (esbuild, and the Bryntum trial packages later) is committed. A fresh-clone check runs before the first push. |
-| Framework | Next.js (App Router), React | **16.4.2** / 19.3.1 | 16.4.2 or newer, because of the security fixes of 2026-10-14. Scaffolded with **`--no-cache-components --no-agent-feedback`**; check that `partialPrefetching` is also gone. Uses `proxy.ts` and async request APIs. Route-group layouts are `force-dynamic`. No DB access at module scope. |
-| Language | TypeScript | **6.0.3** | Decided now: TS 7 has no compiler API, and typescript-eslint supports TS `<6.1.0`. Uses `@types/node@^24` and `"types": ["node"]`. `typecheck` = `tsc --noEmit`. |
-| Styling | Tailwind CSS v4, shadcn/ui CLI | 4.3.3 / 4.22.1 | shadcn now defaults to Base UI. |
-| DB | Postgres 18, Drizzle ORM, postgres.js | drizzle-orm 0.45.4, drizzle-kit 0.31.11, postgres 3.4.9 | Stays on the **0.45 line**; the docs site shows the v1 RC, so watch out for v1-only APIs. SQL migrations are committed. The status trigger is a `drizzle-kit generate --custom` migration. Prod and tests use the same migrator. |
-| Validation | zod | 4.6.7 | |
-| Tests | Vitest (projects: `unit`, `integration`), Playwright, fast-check | 5.0.5 / 1.64.1 | Integration tests run against real Postgres 18 (Homebrew `postgresql@18` locally, a `postgres:18` service in CI). |
-| Voice | Vapi: `@vapi-ai/web`, `@vapi-ai/server-sdk` | **3.0.0** exact / 3.0.0 | Web SDK 3.0.0 is 4 days old. The fallback is 2.7.1. The proxy pattern is checked in the voice spike. |
-| LLM | Gemini via `@google/genai` | 2.30.0 | **Model IDs are only in `.env`.** Google now labels `generateContent` as legacy and recommends the Interactions API. The chat runtime is chosen in stage 7 (§15). |
-| Payments (client) | `@paypal/react-paypal-js/sdk-v6` | 10.6.0 | ESM-only and client-only. `PayPalProvider clientId environment="sandbox"` and `PayPalOneTimePaymentButton`. The client ID is passed from a Server Component as a prop. |
-| Payments (server) | Our own thin `fetch` layer | — | The official server SDK 2.5.0 has no Invoicing, Payouts or Webhooks; we use its types as reference only. |
-| Email | Resend | 6.34.1 | Sends with `Idempotency-Key`, from `mail.<user-domain>`. Bounce and complaint webhooks feed the suppression list. |
-| Scheduler | Bryntum Scheduler trial + `@bryntum/scheduler-react` | 7.3.7 | Installed with `pnpm add -E @bryntum/scheduler@npm:@bryntum/scheduler-trial@7.3.7 @bryntum/scheduler-react@7.3.7`. It is client-only: a `'use client'` wrapper with `next/dynamic(…, { ssr: false })`. **Not added before 11-01.** |
-| Hosting | Render Blueprint (`render.yaml`) | — | Web `0.5c-512mb` ($7/mo), Postgres `0.1c-256mb` with 1 GB ($6/mo), cron (min. $1/mo), all paid from hackathon credit. Region **`oregon`, final** (it can't be changed later). |
+| Area              | Choice                                                           | Version                                                        | Notes                                                                                                                                                                                                                                                                                       |
+| ----------------- | ---------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime           | Node.js                                                          | **24.21.0** on Render (`.node-version`). `engines: ">=24 <27"` | Locally the user has Node 26. CI runs 24. Switching locally to 24 (e.g. `brew install node@24`) is optional and the user's call. Scripts (`scripts/*.ts`) run through `tsx`, which understands the `@/` path alias.                                                                         |
+| Package manager   | pnpm via the `packageManager` field (written by create-next-app) | —                                                              | No `corepack enable`: Render's preinstalled pnpm switches to that version by itself. `pnpm-workspace.yaml` with explicit `allowBuilds` (esbuild, and the Bryntum trial packages later) is committed. A fresh-clone check runs before the first push.                                        |
+| Framework         | Next.js (App Router), React                                      | **16.4.2** / 19.3.1                                            | 16.4.2 or newer, because of the security fixes of 2026-10-14. Scaffolded with **`--no-cache-components --no-agent-feedback`**; check that `partialPrefetching` is also gone. Uses `proxy.ts` and async request APIs. Route-group layouts are `force-dynamic`. No DB access at module scope. |
+| Language          | TypeScript                                                       | **6.0.3**                                                      | Decided now: TS 7 has no compiler API, and typescript-eslint supports TS `<6.1.0`. Uses `@types/node@^24` and `"types": ["node"]`. `typecheck` = `next typegen && tsc --noEmit` (route types such as `LayoutProps` are generated first).                                                    |
+| Styling           | Tailwind CSS v4, shadcn/ui CLI                                   | 4.3.3 / 4.22.0                                                 | shadcn now defaults to Base UI. 4.22.1 is held back by the 3-day release-age gate (`minimumReleaseAge`).                                                                                                                                                                                    |
+| DB                | Postgres 18, Drizzle ORM, postgres.js                            | drizzle-orm 0.45.4, drizzle-kit 0.31.11, postgres 3.4.9        | Stays on the **0.45 line**; the docs site shows the v1 RC, so watch out for v1-only APIs. SQL migrations are committed. The status trigger is a `drizzle-kit generate --custom` migration. Prod and tests use the same migrator.                                                            |
+| Validation        | zod                                                              | 4.6.7                                                          |                                                                                                                                                                                                                                                                                             |
+| Tests             | Vitest (projects: `unit`, `integration`), Playwright, fast-check | 5.0.5 / 1.64.1                                                 | Integration tests run against real Postgres 18: locally Holdline's own instance from `scripts/local-db.sh` (Homebrew binaries, data in `./.pg`, port 55433), in CI a `postgres:18` service.                                                                                                 |
+| Voice             | Vapi: `@vapi-ai/web`, `@vapi-ai/server-sdk`                      | **3.0.0** exact / 3.0.0                                        | Web SDK 3.0.0 is 4 days old. The fallback is 2.7.1. The proxy pattern is checked in the voice spike.                                                                                                                                                                                        |
+| LLM               | Gemini via `@google/genai`                                       | 2.30.0                                                         | **Model IDs are only in `.env`.** Google now labels `generateContent` as legacy and recommends the Interactions API. The chat runtime is chosen in stage 7 (§15).                                                                                                                           |
+| Payments (client) | `@paypal/react-paypal-js/sdk-v6`                                 | 10.6.0                                                         | ESM-only and client-only. `PayPalProvider clientId environment="sandbox"` and `PayPalOneTimePaymentButton`. The client ID is passed from a Server Component as a prop.                                                                                                                      |
+| Payments (server) | Our own thin `fetch` layer                                       | —                                                              | The official server SDK 2.5.0 has no Invoicing, Payouts or Webhooks; we use its types as reference only.                                                                                                                                                                                    |
+| Email             | Resend                                                           | 6.34.1                                                         | Sends with `Idempotency-Key`, from `mail.<user-domain>`. Bounce and complaint webhooks feed the suppression list.                                                                                                                                                                           |
+| Scheduler         | Bryntum Scheduler trial + `@bryntum/scheduler-react`             | 7.3.7                                                          | Installed with `pnpm add -E @bryntum/scheduler@npm:@bryntum/scheduler-trial@7.3.7 @bryntum/scheduler-react@7.3.7`. It is client-only: a `'use client'` wrapper with `next/dynamic(…, { ssr: false })`. **Not added before 11-01.**                                                          |
+| Hosting           | Render Blueprint (`render.yaml`)                                 | —                                                              | Web `0.5c-512mb` ($7/mo), Postgres `0.1c-256mb` with 1 GB ($6/mo), cron (min. $1/mo), all paid from hackathon credit. Region **`oregon`, final** (it can't be changed later).                                                                                                               |
 
 ---
 
@@ -297,33 +297,33 @@ Versions are the npm `latest` as of 2026-10-20 and are **pinned exactly** in `pa
 - Every business table has a `workspace_id`.
 - All PayPal-facing identifiers carry `APP_INSTANCE_ID` (§10.4).
 
-| Table | Purpose and key columns |
-|---|---|
-| `workspaces` | `kind` (`main` \| `demo` \| `phone_demo`), `label` (e.g. "#4821"), `name`, `timezone`, `policy` (jsonb: cancellation window, hold TTL, stale-hold hours, booking window), `sandbox_buyer_index`, `created_at`, `last_active_at` |
-| `services` | `key` (stable seed key), `name`, `category`, `description`, `price_cents`, `duration_min`, `no_show_fee_cents`, `is_emergency`, `active` |
-| `addon_items` | `key`, `name`, `unit_price_cents`, `unit` |
-| `technicians` | `key`, `name`, `skills[]`, `payout_email` (sandbox personal account, from env), `payout_share_bps` (6000 = 60%), `working_hours` |
-| `customers` | `name`, `email`, `phone`, `address`. **PII**, purged per §21. |
-| `calls` | `vapi_call_id` (unique) or `chat_session_id`, `channel` (`web` \| `phone` \| `chat`), `caller_hash`, `control_url` (never sent to the client), `status`, timestamps, `duration_s`, `transcript`, `messages`, `gemini_contents` (raw `Content[]`, chat only), `summary` (jsonb), `cost_cents`, `ended_reason` |
-| `bookings` | `ref` (**globally unique**, e.g. `HL-7K3Q9`), `status` (§8), `payment_issue` (§8.3), `version`, `service_id`, `technician_id`, `customer_id`, `call_id`, `slot_start`, `slot_end`, price snapshot (`price_cents`, `no_show_fee_cents`, `currency`), `problem_summary`, `urgency`, `hold_expires_at`, `authorizing_until`, `active_authorization_id`, `cancel_reason`, `status_changed_at` |
-| `booking_events` | Append-only: `from`, `to` (or `null` for flag-only events), `flag`, `actor` (`agent` \| `owner` \| `customer` \| `system` \| `webhook`), `reason`, `at` |
-| `booking_claims` | `workspace_id`, `booking_id` (unique), `claimed_at`. Phone bookings claimed into a demo workspace. |
-| `pay_tokens` | `booking_id`, `token_hash`, `purpose` (`email_link` \| `device_link`), `expires_at`, `used_at` |
-| `paypal_orders` | `paypal_order_id` (unique), `booking_id`, `attempt`, `status`, `amount_cents` |
-| `authorizations` | `paypal_authorization_id` (unique), `booking_id`, `parent_authorization_id` (set on a reauthorization), `status`, `amount_cents`, `honor_until`, `valid_until`, `reauthorize_at`, `role` (`active` \| `replaced` \| `orphan`) |
-| `captures` | `paypal_capture_id` (unique), `booking_id`, `authorization_id`, `kind` (`full` \| `no_show_fee` \| `late_cancel_fee`), `amount_cents`, `final_capture`, `status` |
-| `invoices` | `paypal_invoice_id` (unique), `invoice_number` (unique, our own), `booking_id`, `kind` (`extra_work` \| `fallback`), `status` (`draft` → `sent` → `paid` \| `cancelled`), `items` (snapshot), `total_cents`, `paid_cents`, `payer_view_url` |
-| `payouts` | **UNIQUE (`source`, `source_id`, `technician_id`, `attempt_no`)**, `booking_id`, `amount_cents`, `sender_batch_id` (unique), `paypal_batch_id`, `paypal_item_id`, `status` |
-| `payment_operations` | **Idempotency ledger** (§10.3): `key` (unique), `kind`, `booking_id`, `paypal_request_id`, `state` (`in_flight` \| `succeeded` \| `failed`), `lease_until`, `attempts`, `last_error`, `result` |
-| `paypal_api_log` | One row per PayPal call: `op`, `method`, `path`, `http_status`, PayPal IDs, `debug_id`, `duration_ms`, `at`. **No PII.** Feeds the PayPal activity feed. |
-| `webhook_events` | `paypal_event_id` (unique), `event_type`, `resource_id`, `raw`, `simulated`, `received_at`, `processed_at`, `attempts`, `error`. **Only verified events are stored.** |
-| `call_notifications` | UNIQUE (`booking_id`, `status`, `channel`): `sent_at`, `via` (`server` \| `browser` \| `chat`), `ok` |
-| `outbox_emails` | `idempotency_key` (unique), `to_hmac`, `to` (null when outbox-only), `template`, `booking_id`, `html`, `status` (`pending` \| `sent` \| `failed` \| `outbox_only`), `resend_id`, `attempts` |
-| `email_identities` | `workspace_id`, `email`, `email_hmac`, `confirmed_at`, `confirm_token_hash` |
-| `email_suppressions` | `email_hmac` (unique), `reason` (`bounce` \| `complaint`), `at` |
-| `rate_counters` | **UNIQUE (`scope`, `key`, `window`)**, `n`. Updated atomically (§20). |
-| `admin_sessions` | `id` (random), `created_at`, `expires_at` (12 h) |
-| `app_meta` | `last_tick_at`, the job heartbeat |
+| Table                | Purpose and key columns                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workspaces`         | `kind` (`main` \| `demo` \| `phone_demo`), `label` (e.g. "#4821"), `name`, `timezone`, `policy` (jsonb: cancellation window, hold TTL, stale-hold hours, booking window), `sandbox_buyer_index`, `created_at`, `last_active_at`                                                                                                                                                           |
+| `services`           | `key` (stable seed key), `name`, `category`, `description`, `price_cents`, `duration_min`, `no_show_fee_cents`, `is_emergency`, `active`                                                                                                                                                                                                                                                  |
+| `addon_items`        | `key`, `name`, `unit_price_cents`, `unit`                                                                                                                                                                                                                                                                                                                                                 |
+| `technicians`        | `key`, `name`, `skills[]`, `payout_email` (sandbox personal account, from env), `payout_share_bps` (6000 = 60%), `working_hours`                                                                                                                                                                                                                                                          |
+| `customers`          | `name`, `email`, `phone`, `address`. **PII**, purged per §21.                                                                                                                                                                                                                                                                                                                             |
+| `calls`              | `vapi_call_id` (unique) or `chat_session_id`, `channel` (`web` \| `phone` \| `chat`), `caller_hash`, `control_url` (never sent to the client), `status`, timestamps, `duration_s`, `transcript`, `messages`, `gemini_contents` (raw `Content[]`, chat only), `summary` (jsonb), `cost_cents`, `ended_reason`                                                                              |
+| `bookings`           | `ref` (**globally unique**, e.g. `HL-7K3Q9`), `status` (§8), `payment_issue` (§8.3), `version`, `service_id`, `technician_id`, `customer_id`, `call_id`, `slot_start`, `slot_end`, price snapshot (`price_cents`, `no_show_fee_cents`, `currency`), `problem_summary`, `urgency`, `hold_expires_at`, `authorizing_until`, `active_authorization_id`, `cancel_reason`, `status_changed_at` |
+| `booking_events`     | Append-only: `from`, `to` (or `null` for flag-only events), `flag`, `actor` (`agent` \| `owner` \| `customer` \| `system` \| `webhook`), `reason`, `at`                                                                                                                                                                                                                                   |
+| `booking_claims`     | `workspace_id`, `booking_id` (unique), `claimed_at`. Phone bookings claimed into a demo workspace.                                                                                                                                                                                                                                                                                        |
+| `pay_tokens`         | `booking_id`, `token_hash`, `purpose` (`email_link` \| `device_link`), `expires_at`, `used_at`                                                                                                                                                                                                                                                                                            |
+| `paypal_orders`      | `paypal_order_id` (unique), `booking_id`, `attempt`, `status`, `amount_cents`                                                                                                                                                                                                                                                                                                             |
+| `authorizations`     | `paypal_authorization_id` (unique), `booking_id`, `parent_authorization_id` (set on a reauthorization), `status`, `amount_cents`, `honor_until`, `valid_until`, `reauthorize_at`, `role` (`active` \| `replaced` \| `orphan`)                                                                                                                                                             |
+| `captures`           | `paypal_capture_id` (unique), `booking_id`, `authorization_id`, `kind` (`full` \| `no_show_fee` \| `late_cancel_fee`), `amount_cents`, `final_capture`, `status`                                                                                                                                                                                                                          |
+| `invoices`           | `paypal_invoice_id` (unique), `invoice_number` (unique, our own), `booking_id`, `kind` (`extra_work` \| `fallback`), `status` (`draft` → `sent` → `paid` \| `cancelled`), `items` (snapshot), `total_cents`, `paid_cents`, `payer_view_url`                                                                                                                                               |
+| `payouts`            | **UNIQUE (`source`, `source_id`, `technician_id`, `attempt_no`)**, `booking_id`, `amount_cents`, `sender_batch_id` (unique), `paypal_batch_id`, `paypal_item_id`, `status`                                                                                                                                                                                                                |
+| `payment_operations` | **Idempotency ledger** (§10.3): `key` (unique), `kind`, `booking_id`, `paypal_request_id`, `state` (`in_flight` \| `succeeded` \| `failed`), `lease_until`, `attempts`, `last_error`, `result`                                                                                                                                                                                            |
+| `paypal_api_log`     | One row per PayPal call: `op`, `method`, `path`, `http_status`, PayPal IDs, `debug_id`, `duration_ms`, `at`. **No PII.** Feeds the PayPal activity feed.                                                                                                                                                                                                                                  |
+| `webhook_events`     | `paypal_event_id` (unique), `event_type`, `resource_id`, `raw`, `simulated`, `received_at`, `processed_at`, `attempts`, `error`. **Only verified events are stored.**                                                                                                                                                                                                                     |
+| `call_notifications` | UNIQUE (`booking_id`, `status`, `channel`): `sent_at`, `via` (`server` \| `browser` \| `chat`), `ok`                                                                                                                                                                                                                                                                                      |
+| `outbox_emails`      | `idempotency_key` (unique), `to_hmac`, `to` (null when outbox-only), `template`, `booking_id`, `html`, `status` (`pending` \| `sent` \| `failed` \| `outbox_only`), `resend_id`, `attempts`                                                                                                                                                                                               |
+| `email_identities`   | `workspace_id`, `email`, `email_hmac`, `confirmed_at`, `confirm_token_hash`                                                                                                                                                                                                                                                                                                               |
+| `email_suppressions` | `email_hmac` (unique), `reason` (`bounce` \| `complaint`), `at`                                                                                                                                                                                                                                                                                                                           |
+| `rate_counters`      | **UNIQUE (`scope`, `key`, `window`)**, `n`. Updated atomically (§20).                                                                                                                                                                                                                                                                                                                     |
+| `admin_sessions`     | `id` (random), `created_at`, `expires_at` (12 h)                                                                                                                                                                                                                                                                                                                                          |
+| `app_meta`           | `last_tick_at`, the job heartbeat                                                                                                                                                                                                                                                                                                                                                         |
 
 ---
 
@@ -331,48 +331,48 @@ Versions are the npm `latest` as of 2026-10-20 and are **pinned exactly** in `pa
 
 ### 8.1 States
 
-| Rank | State | Meaning |
-|---|---|---|
-| 0 | `pending_payment` | Booking created by the agent. The slot is held until `hold_expires_at` (default **60 min**). The PayPal link has been issued. **Not confirmed.** |
-| 1 | `authorized` | A PayPal authorization with status **`CREATED`** and the snapshot amount exists. **Appointment confirmed.** |
-| 2 | `completed` | Owner clicked **Job done**. |
-| 2 | `no_show` | Owner clicked **No-show**. |
-| 2 | `cancelled` | Cancelled after authorization, by the owner or by the system (stale-hold timeout). |
-| 3 | `captured` | Money recognised: full price, no-show fee, late-cancel fee, or a paid fallback invoice. |
-| 3 | `voided` | Hold released. Terminal. |
-| 3 | `expired` | Never authorized. Reasons: `ttl`, `withdrawn` or `superseded`. Terminal. The slot is released. |
-| 4 | `paid_out` | Every payout for the **main** captured amount (full price or fee) has succeeded. Terminal for the main lifecycle. Extra-work invoices have their own lifecycle (§9.6). |
+| Rank | State             | Meaning                                                                                                                                                                |
+| ---- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | `pending_payment` | Booking created by the agent. The slot is held until `hold_expires_at` (default **60 min**). The PayPal link has been issued. **Not confirmed.**                       |
+| 1    | `authorized`      | A PayPal authorization with status **`CREATED`** and the snapshot amount exists. **Appointment confirmed.**                                                            |
+| 2    | `completed`       | Owner clicked **Job done**.                                                                                                                                            |
+| 2    | `no_show`         | Owner clicked **No-show**.                                                                                                                                             |
+| 2    | `cancelled`       | Cancelled after authorization, by the owner or by the system (stale-hold timeout).                                                                                     |
+| 3    | `captured`        | Money recognised: full price, no-show fee, late-cancel fee, or a paid fallback invoice.                                                                                |
+| 3    | `voided`          | Hold released. Terminal.                                                                                                                                               |
+| 3    | `expired`         | Never authorized. Reasons: `ttl`, `withdrawn` or `superseded`. Terminal. The slot is released.                                                                         |
+| 4    | `paid_out`        | Every payout for the **main** captured amount (full price or fee) has succeeded. Terminal for the main lifecycle. Extra-work invoices have their own lifecycle (§9.6). |
 
 ### 8.2 Allowed transitions
 
 These are the only ones.
 
-| From | To | Trigger (actor) | Money effect |
-|---|---|---|---|
-| `pending_payment` | `authorized` | Authorization `CREATED` + amount check (onApprove, webhook or reconciler) | Hold placed |
-| `pending_payment` | `expired` | TTL job (`ttl`), owner withdraws (`withdrawn`), the agent replaces the booking in the same call (`superseded`) | None |
-| `authorized` | `completed` | Job done (owner) | Then full capture |
-| `authorized` | `no_show` | No-show (owner) | Then fee capture, `final_capture: true` |
-| `authorized` | `cancelled` | Cancel (owner), stale hold (system) | Then void, or the late fee |
-| `completed` | `captured` | Full capture done, or fallback invoice paid | Charged |
-| `no_show` | `captured` | Fee capture done | Fee charged, rest released |
-| `no_show` | `voided` | Waive fee (owner) | Hold released |
-| `cancelled` | `voided` | Timely cancel (≥ 24 h), stale hold, or the owner waives a failed late fee | Hold released |
-| `cancelled` | `captured` | Late cancel (< 24 h): fee capture done | Fee charged, rest released |
-| `captured` | `paid_out` | Main payouts succeeded | Technician paid |
+| From              | To           | Trigger (actor)                                                                                                | Money effect                            |
+| ----------------- | ------------ | -------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `pending_payment` | `authorized` | Authorization `CREATED` + amount check (onApprove, webhook or reconciler)                                      | Hold placed                             |
+| `pending_payment` | `expired`    | TTL job (`ttl`), owner withdraws (`withdrawn`), the agent replaces the booking in the same call (`superseded`) | None                                    |
+| `authorized`      | `completed`  | Job done (owner)                                                                                               | Then full capture                       |
+| `authorized`      | `no_show`    | No-show (owner)                                                                                                | Then fee capture, `final_capture: true` |
+| `authorized`      | `cancelled`  | Cancel (owner), stale hold (system)                                                                            | Then void, or the late fee              |
+| `completed`       | `captured`   | Full capture done, or fallback invoice paid                                                                    | Charged                                 |
+| `no_show`         | `captured`   | Fee capture done                                                                                               | Fee charged, rest released              |
+| `no_show`         | `voided`     | Waive fee (owner)                                                                                              | Hold released                           |
+| `cancelled`       | `voided`     | Timely cancel (≥ 24 h), stale hold, or the owner waives a failed late fee                                      | Hold released                           |
+| `cancelled`       | `captured`   | Late cancel (< 24 h): fee capture done                                                                         | Fee charged, rest released              |
+| `captured`        | `paid_out`   | Main payouts succeeded                                                                                         | Technician paid                         |
 
 ### 8.3 Payment flags
 
 These move sideways, so no status ever goes backwards. `payment_issue` is a single nullable enum, and every change is logged in `booking_events`.
 
-| Flag | Set when | Effect |
-|---|---|---|
-| `authorization_pending` | The authorize response has status `PENDING` (`PENDING_REVIEW`) | Stays `pending_payment` with the hold window extended. `check_payment_status` returns `processing`. Cleared by the `PAYMENT.AUTHORIZATION.CREATED` webhook or a reconciler GET. |
-| `reauth_failed` | The reauthorization failed | Stays `authorized`. The owner is alerted, and **re-approval** is offered (§9.8). |
-| `hold_lost` | `PAYMENT.AUTHORIZATION.VOIDED` arrives while `authorized` and we didn't void it ourselves | As above |
-| `capture_failed` | Capture `DECLINED`/`FAILED`, a 422 `AUTHORIZATION_EXPIRED`/`VOIDED`/`DENIED`, or a PENDING capture later declined | Retry capture or **Bill via invoice** (§9.7). Payouts are held. |
-| `capture_pending` | Capture `PENDING` | Booking is `captured`. Payouts wait for `PAYMENT.CAPTURE.COMPLETED`. |
-| `payout_failed` | A payout item ended `FAILED`/`RETURNED`/`BLOCKED`, or `UNCLAIMED` past its wait | Retry payout (§9.9) |
+| Flag                    | Set when                                                                                                          | Effect                                                                                                                                                                          |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authorization_pending` | The authorize response has status `PENDING` (`PENDING_REVIEW`)                                                    | Stays `pending_payment` with the hold window extended. `check_payment_status` returns `processing`. Cleared by the `PAYMENT.AUTHORIZATION.CREATED` webhook or a reconciler GET. |
+| `reauth_failed`         | The reauthorization failed                                                                                        | Stays `authorized`. The owner is alerted, and **re-approval** is offered (§9.8).                                                                                                |
+| `hold_lost`             | `PAYMENT.AUTHORIZATION.VOIDED` arrives while `authorized` and we didn't void it ourselves                         | As above                                                                                                                                                                        |
+| `capture_failed`        | Capture `DECLINED`/`FAILED`, a 422 `AUTHORIZATION_EXPIRED`/`VOIDED`/`DENIED`, or a PENDING capture later declined | Retry capture or **Bill via invoice** (§9.7). Payouts are held.                                                                                                                 |
+| `capture_pending`       | Capture `PENDING`                                                                                                 | Booking is `captured`. Payouts wait for `PAYMENT.CAPTURE.COMPLETED`.                                                                                                            |
+| `payout_failed`         | A payout item ended `FAILED`/`RETURNED`/`BLOCKED`, or `UNCLAIMED` past its wait                                   | Retry payout (§9.9)                                                                                                                                                             |
 
 ### 8.4 Invariants
 
@@ -382,7 +382,7 @@ These are enforced in code, in the DB and in tests.
    - The pure `transition()` table encodes this.
    - Writes are compare-and-set: `UPDATE … SET status=$to, version=version+1 WHERE id=$id AND status=$from RETURNING *`.
    - A **Postgres trigger** (custom migration) rejects any other status change.
-2. **Exact repeats are idempotent, siblings conflict visibly.** Repeating a transition that is already recorded in `booking_events` is a silent no-op that returns the current state. A *sibling* request is a visible 409 with "Already marked as no-show", so the losing click gets no fake success. Examples of siblings: Job done after No-show, or Cancel after Job done.
+2. **Exact repeats are idempotent, siblings conflict visibly.** Repeating a transition that is already recorded in `booking_events` is a silent no-op that returns the current state. A _sibling_ request is a visible 409 with "Already marked as no-show", so the losing click gets no fake success. Examples of siblings: Job done after No-show, or Cancel after Job done.
 3. **Money follows state.** A PayPal side effect (capture, void, fee) runs only after the CAS into the intent state, and only through a `payment_operations` ledger entry.
    - **The one documented exception is the compensating void of orphaned holds (§9.10).** It changes no status and is logged in `booking_events`.
 4. **Problems never roll back.** They become flags (§8.3) with explicit owner actions.
@@ -609,14 +609,14 @@ Handling:
 
 ### 10.2 Modules
 
-| Module | Calls |
-|---|---|
-| `orders.ts` | `createOrder`, `getOrder`, `authorizeOrder` |
-| `payments.ts` | `getAuthorization`, `captureAuthorization`, `voidAuthorization`, `reauthorizeAuthorization`, `getCapture` |
-| `invoicing.ts` | `createInvoice`, `sendInvoice`, `getInvoice`, `searchInvoicesByNumber`, `cancelInvoice` |
-| `payouts.ts` | `createPayout`, `getPayoutBatch`, `getPayoutItem`, `cancelUnclaimedItem` |
-| `webhooks.ts` | `verifyOffline` (§11), `verifyViaApi` (used only when the cert fetch fails), `listWebhooks` / `createWebhook` (setup script) |
-| `mock/` | A fake PayPal with the same interface and scriptable outcomes: declined, pending, denied, 5xx, timeout-after-success, 409, unclaimed |
+| Module         | Calls                                                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `orders.ts`    | `createOrder`, `getOrder`, `authorizeOrder`                                                                                          |
+| `payments.ts`  | `getAuthorization`, `captureAuthorization`, `voidAuthorization`, `reauthorizeAuthorization`, `getCapture`                            |
+| `invoicing.ts` | `createInvoice`, `sendInvoice`, `getInvoice`, `searchInvoicesByNumber`, `cancelInvoice`                                              |
+| `payouts.ts`   | `createPayout`, `getPayoutBatch`, `getPayoutItem`, `cancelUnclaimedItem`                                                             |
+| `webhooks.ts`  | `verifyOffline` (§11), `verifyViaApi` (used only when the cert fetch fails), `listWebhooks` / `createWebhook` (setup script)         |
+| `mock/`        | A fake PayPal with the same interface and scriptable outcomes: declined, pending, denied, 5xx, timeout-after-success, 409, unclaimed |
 
 ### 10.3 Idempotency ledger
 
@@ -682,22 +682,22 @@ PayPal keeps request IDs for **≥ 6 h**; the docs contradict each other, so we 
 - Uses `FOR UPDATE SKIP LOCKED`.
 - Bounded per tick.
 - Every `after()` side effect can be re-driven by a job.
-- `/api/health` reports `last_tick_at`.
+- `/api/health` reports the heartbeat as `lastTickAt`.
 
 **Order inside a tick**
 
-| # | Job | Rule |
-|---|---|---|
-| 1 | **Reconcile** | Re-drive `in_flight` ledger rows whose lease expired (GET first, §10.3). Re-process unprocessed webhook events. Authorize bookings whose order is `APPROVED`. Sweep orphan authorizations (§9.10). Poll invoices that are `sent`, captures that are `PENDING` and payouts that are `processing`. |
-| 2 | **Outbox** | Re-send `pending` or `failed` emails older than 2 min, with the same Idempotency-Key, for up to 24 h. |
-| 3 | **Expire unpaid** | `pending_payment` with `hold_expires_at < now`, **no live `authorizing_until`, no in-flight authorize** and no order in `APPROVED` (GET when unsure) → `expired` (`ttl`). Releases the slot and runs `notifyCall(expired)`. |
-| 4 | **Reauthorize** | Needed when `slot_end + 24 h > honor_until`. `reauthorize_at = max(authorized_at + 3 d + 1 h, slot_end − 24 h)`, never later than `authorized_at + 28 d`.<br>At that time: GET the parent, then `POST …/reauthorize` with request ID `<instance>:reauth:<authId>`. The new child authorization becomes `active` for capture; voids still go to the parent.<br>**One reauthorization per chain** (the docs contradict each other on "multiple", so we take the strict reading).<br>On failure: `reauth_failed` and an alert. |
-| 5 | **Release stale holds** | `authorized` where `slot_end + 72 h` has passed, or the authorization is near day 28 → `cancelled` (`hold_timeout`) → void → `voided`. The owner is notified. |
-| 6 | **Payouts** | Send `pending` payout rows. Handle `UNCLAIMED` waits and cancels. Move bookings to `paid_out`. |
-| 7 | **Summaries** | Retry failed Gemini call summaries. They count against the daily budget (§22). |
-| 8 | **Retention** | Purge PII older than 14 days in **all** workspaces (§21). |
-| 9 | **Phone-demo reset** | Nightly at 03:00 CT: void open holds, purge PII, reset the slots. |
-| 10 | **Demo cleanup** | Demo workspaces inactive for over 30 days: void open holds, then delete. Never before 2026-12-16. |
+| #   | Job                     | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Reconcile**           | Re-drive `in_flight` ledger rows whose lease expired (GET first, §10.3). Re-process unprocessed webhook events. Authorize bookings whose order is `APPROVED`. Sweep orphan authorizations (§9.10). Poll invoices that are `sent`, captures that are `PENDING` and payouts that are `processing`.                                                                                                                                                                                                                            |
+| 2   | **Outbox**              | Re-send `pending` or `failed` emails older than 2 min, with the same Idempotency-Key, for up to 24 h.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 3   | **Expire unpaid**       | `pending_payment` with `hold_expires_at < now`, **no live `authorizing_until`, no in-flight authorize** and no order in `APPROVED` (GET when unsure) → `expired` (`ttl`). Releases the slot and runs `notifyCall(expired)`.                                                                                                                                                                                                                                                                                                 |
+| 4   | **Reauthorize**         | Needed when `slot_end + 24 h > honor_until`. `reauthorize_at = max(authorized_at + 3 d + 1 h, slot_end − 24 h)`, never later than `authorized_at + 28 d`.<br>At that time: GET the parent, then `POST …/reauthorize` with request ID `<instance>:reauth:<authId>`. The new child authorization becomes `active` for capture; voids still go to the parent.<br>**One reauthorization per chain** (the docs contradict each other on "multiple", so we take the strict reading).<br>On failure: `reauth_failed` and an alert. |
+| 5   | **Release stale holds** | `authorized` where `slot_end + 72 h` has passed, or the authorization is near day 28 → `cancelled` (`hold_timeout`) → void → `voided`. The owner is notified.                                                                                                                                                                                                                                                                                                                                                               |
+| 6   | **Payouts**             | Send `pending` payout rows. Handle `UNCLAIMED` waits and cancels. Move bookings to `paid_out`.                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 7   | **Summaries**           | Retry failed Gemini call summaries. They count against the daily budget (§22).                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 8   | **Retention**           | Purge PII older than 14 days in **all** workspaces (§21).                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 9   | **Phone-demo reset**    | Nightly at 03:00 CT: void open holds, purge PII, reset the slots.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 10  | **Demo cleanup**        | Demo workspaces inactive for over 30 days: void open holds, then delete. Never before 2026-12-16.                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 The real-sandbox reauthorization check runs on or after **10-26**, using authorizations created and left open in stage 2 (§27 R3).
 
@@ -709,7 +709,7 @@ The real-sandbox reauthorization check runs on or after **10-26**, using authori
 
 **Core rules**
 
-- **Persona:** the friendly, efficient receptionist of *{workspace.name}*. Short sentences, one question at a time, details confirmed back.
+- **Persona:** the friendly, efficient receptionist of _{workspace.name}_. Short sentences, one question at a time, details confirmed back.
 - **Collect:** the problem, urgency, service address, and preferred day and time. Times are always stated in **Austin time (CT)**.
 - **Safety first:** if the caller mentions gas smell, sparking, flooding near electrics or a similar hazard, give the standard safety advice (leave or ventilate, shut off the main, call 911) before anything else.
 - **Prices:**
@@ -724,7 +724,7 @@ The real-sandbox reauthorization check runs on or after **10-26**, using authori
   - Mention the no-show fee and free cancellation up to 24 h before.
   - "The PayPal button is on your screen" (web/chat), or "in your email" (phone).
 - **Confirmation language:**
-  - Never say *confirmed, booked, all set, locked in* or *reserved* about the appointment before a `[payment-update]` message or `check_payment_status` has said `authorized`.
+  - Never say _confirmed, booked, all set, locked in_ or _reserved_ about the appointment before a `[payment-update]` message or `check_payment_status` has said `authorized`.
   - After the server has announced the confirmation (§16), don't repeat it. Answer follow-ups such as "did it go through?" with `check_payment_status`.
 - **Ending the call:** with a pending booking, say before ending: "You can finish from the email link within the next hour; the slot is held until then."
 - **The agent cannot** capture, void, refund, invoice or pay out. If asked, it explains that the business handles these after the visit.
@@ -732,22 +732,22 @@ The real-sandbox reauthorization check runs on or after **10-26**, using authori
 
 **Channel sections**
 
-| Channel | Specific rules |
-|---|---|
-| Web call | Name and email come from the form; only confirm them. No callback number. |
-| Phone | Collect name, email (spelled back letter by letter) and callback number. Read out the booking ref and say it can be claimed on the website. |
-| Chat | No spelling. Keep replies short. Offer quick choices where natural. |
+| Channel  | Specific rules                                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web call | Name and email come from the form; only confirm them. No callback number.                                                                   |
+| Phone    | Collect name, email (spelled back letter by letter) and callback number. Read out the booking ref and say it can be claimed on the website. |
+| Chat     | No spelling. Keep replies short. Offer quick choices where natural.                                                                         |
 
 ### 13.2 Tools
 
 The schemas are flat (no `anyOf`/`oneOf`), with primitives and enums only.
 
-| Tool | Parameters | Result (typed object) |
-|---|---|---|
-| `get_services` | `category?` (`plumbing` \| `electrical`), `urgent?` | `{ services: [{ service_id, name, description, price: "$149.00", duration_min, no_show_fee: "$49.00" }] }` |
-| `check_availability` | `service_id`, `preferred_date` (YYYY-MM-DD local), `time_of_day?` (`morning` \| `afternoon` \| `any`), `urgent?` | `{ slots: [{ slot_id, label: "Thu Oct 22, 10:00–12:00 CT", technician_first_name }] }` (≤ 3 slots) |
+| Tool                               | Parameters                                                                                                                                                           | Result (typed object)                                                                                                                                                                                                          |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get_services`                     | `category?` (`plumbing` \| `electrical`), `urgent?`                                                                                                                  | `{ services: [{ service_id, name, description, price: "$149.00", duration_min, no_show_fee: "$49.00" }] }`                                                                                                                     |
+| `check_availability`               | `service_id`, `preferred_date` (YYYY-MM-DD local), `time_of_day?` (`morning` \| `afternoon` \| `any`), `urgent?`                                                     | `{ slots: [{ slot_id, label: "Thu Oct 22, 10:00–12:00 CT", technician_first_name }] }` (≤ 3 slots)                                                                                                                             |
 | `create_booking_with_payment_link` | `service_id`, `slot_id`, `customer_name`, `customer_email`, `customer_phone?`, `service_address`, `problem_summary`, `urgency` (`emergency` \| `soon` \| `flexible`) | `{ ok, booking_ref, hold_amount, no_show_fee, cancellation_policy, delivery: "screen" \| "email" \| "screen_and_email", next_step }` or `{ ok:false, reason: "slot_taken" \| "invalid_slot" \| "authorize_in_progress", say }` |
-| `check_payment_status` | `booking_ref?` (defaults to the call's current booking) | `{ status: "waiting" \| "processing" \| "authorized" \| "declined_retry" \| "expired", appointment_label?, technician_first_name? }` |
+| `check_payment_status`             | `booking_ref?` (defaults to the call's current booking)                                                                                                              | `{ status: "waiting" \| "processing" \| "authorized" \| "declined_retry" \| "expired", appointment_label?, technician_first_name? }`                                                                                           |
 
 ### 13.3 Handler rules
 
@@ -940,15 +940,15 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
 
 ## 18. Dashboard (`/dashboard`)
 
-| View | Contents |
-|---|---|
-| Overview | KPI cards (calls answered, bookings, hold value secured, captured revenue, no-show fees recovered, payouts); the **compact Bryntum schedule** (stage 10); upcoming jobs; "needs attention" (payment flags); the **PayPal activity** feed from `paypal_api_log` and `webhook_events`, showing call, PayPal ID, status, `debug_id` and webhook receipt |
-| Calls | List; detail with the **"AI summary"** card (untrusted, never triggers actions), transcript and linked booking. No recordings. |
-| Bookings | Filterable list; detail with the timeline from `booking_events`, payment details (order, authorization chain, captures, invoices and payouts, each with its PayPal IDs) and actions |
-| Payments & payouts | One ledger view, plus payouts per technician |
-| Price list & policies | Read-only: services, fees, the 24 h window, the 14-day booking window, the 60% technician share. It shows judges where every number the agent says comes from. |
-| Outbox | Every rendered email, including the outbox-only ones |
-| Schedule | The full Bryntum Scheduler (stage 10) |
+| View                  | Contents                                                                                                                                                                                                                                                                                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview              | KPI cards (calls answered, bookings, hold value secured, captured revenue, no-show fees recovered, payouts); the **compact Bryntum schedule** (stage 10); upcoming jobs; "needs attention" (payment flags); the **PayPal activity** feed from `paypal_api_log` and `webhook_events`, showing call, PayPal ID, status, `debug_id` and webhook receipt |
+| Calls                 | List; detail with the **"AI summary"** card (untrusted, never triggers actions), transcript and linked booking. No recordings.                                                                                                                                                                                                                       |
+| Bookings              | Filterable list; detail with the timeline from `booking_events`, payment details (order, authorization chain, captures, invoices and payouts, each with its PayPal IDs) and actions                                                                                                                                                                  |
+| Payments & payouts    | One ledger view, plus payouts per technician                                                                                                                                                                                                                                                                                                         |
+| Price list & policies | Read-only: services, fees, the 24 h window, the 14-day booking window, the 60% technician share. It shows judges where every number the agent says comes from.                                                                                                                                                                                       |
+| Outbox                | Every rendered email, including the outbox-only ones                                                                                                                                                                                                                                                                                                 |
+| Schedule              | The full Bryntum Scheduler (stage 10)                                                                                                                                                                                                                                                                                                                |
 
 **Actions** (owner session or demo cookie; Server Actions)
 
@@ -1064,20 +1064,20 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
 
 The user's rule applies: **no paid API call without an explicit approval for that call.**
 
-| Service | Cost | Controls |
-|---|---|---|
-| Render | About $14/month, paid from the $50 hackathon credit | Fixed plans in `render.yaml` |
-| Vapi | $0.05/min platform fee plus providers, about $0.08–0.13/min in total. $5 free credit, roughly 40–60 min. | **The user decides the budget before stage 4:** the amount, auto-reload **off**, and a split between a development budget and a judging budget. Judge-initiated calls run under that standing budget. Calls I start for testing still need a yes per call.<br>Caps: at most 3 web calls per demo workspace per day; per IP hash; a **global daily voice-minute cap**, `DEMO_DAILY_VOICE_MINUTES` = judging budget ÷ judging days (lower between 11-12 and 12-01); phone at 2 per caller per day plus a global phone cap; `maxDurationSeconds` (§14.1).<br>A failed start (cap, concurrency of 4 lines, balance) → "Voice line busy — the chat uses the same agent and payment flow". `/try` shows today's remaining minutes, and the dashboard shows the cost per call. |
-| Gemini (paid tier) | Cents per demo | Sizes per §15. **A global daily budget, `GEMINI_DAILY_BUDGET_CENTS`, counted from `usageMetadata`.** Above it, the chat says "demo budget reached for today". Evals and summary retries count against the same budget.<br>The user sets an AI Studio monthly spend cap or prepay as a backstop (it reacts with about 10 minutes' delay). |
-| Resend | Free (100/day) | §19 |
-| PayPal sandbox | Free | — |
+| Service            | Cost                                                                                                     | Controls                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Render             | About $14/month, paid from the $50 hackathon credit                                                      | Fixed plans in `render.yaml`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Vapi               | $0.05/min platform fee plus providers, about $0.08–0.13/min in total. $5 free credit, roughly 40–60 min. | **The user decides the budget before stage 4:** the amount, auto-reload **off**, and a split between a development budget and a judging budget. Judge-initiated calls run under that standing budget. Calls I start for testing still need a yes per call.<br>Caps: at most 3 web calls per demo workspace per day; per IP hash; a **global daily voice-minute cap**, `DEMO_DAILY_VOICE_MINUTES` = judging budget ÷ judging days (lower between 11-12 and 12-01); phone at 2 per caller per day plus a global phone cap; `maxDurationSeconds` (§14.1).<br>A failed start (cap, concurrency of 4 lines, balance) → "Voice line busy — the chat uses the same agent and payment flow". `/try` shows today's remaining minutes, and the dashboard shows the cost per call. |
+| Gemini (paid tier) | Cents per demo                                                                                           | Sizes per §15. **A global daily budget, `GEMINI_DAILY_BUDGET_CENTS`, counted from `usageMetadata`.** Above it, the chat says "demo budget reached for today". Evals and summary retries count against the same budget.<br>The user sets an AI Studio monthly spend cap or prepay as a backstop (it reacts with about 10 minutes' delay).                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Resend             | Free (100/day)                                                                                           | §19                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| PayPal sandbox     | Free                                                                                                     | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ---
 
 ## 23. Design
 
 - **Look:** clean and simple, black and white with **one blue accent**, Holdline blue `#0A5CFF` (deliberately not PayPal's palette).
-- **Type:** Geist Sans and Geist Mono.
+- **Type:** Geist Sans and Geist Mono, self-hosted through the official `geist` package (builds need no network).
 - **Layout:** 8-pt spacing, rounded-xl cards, thin borders, no gradients.
 - **Logo:** a "holdline" wordmark with a handset-and-pause glyph.
 - **PayPal mark:** only inside the official `PayPalOneTimePaymentButton`.
@@ -1104,14 +1104,14 @@ The user's rule applies: **no paid API call without an explicit approval for tha
 
 ## 24. Testing strategy
 
-| Layer | Tooling | What |
-|---|---|---|
-| Unit | Vitest project `unit` (parallel) | State machine and flag tables, rank property (fast-check), pricing, payout and invoice math, reauth scheduling, slot generation (incl. the US DST change on 11-01), token purposes, webhook verification (generated RSA cert, unsigned CRC32, look-alike hosts, userinfo URLs, wrong path, oversized and non-UTF-8 bodies), PayPal client (request-ID spy, retries, 409, error mapping), external-ID prefixes, env/config check |
-| Integration | Vitest project `integration` with `fileParallelism: false`. `globalSetup` runs the **production migrator** (including the trigger) on `DATABASE_URL_TEST`. Each test creates its own workspace. | Every payment path through the service layer with fake PayPal; DB trigger; ledger concurrency; webhook route (forged → 4xx, nothing stored); Vapi fixtures (recorded payloads); proxy body rewrite; caps |
-| E2E | `pnpm test:e2e` (Playwright), with `PAYPAL_MODE=mock` and a fake LLM. Separate from `pnpm test`. | `/try` → chat → booking → pay panel → authorized → auto-confirmation → dashboard Job done → captured → paid_out |
-| Sandbox smoke | `pnpm sandbox:smoke` and `/lab/paypal` (manual, real sandbox, free) | §27 R1–R3, R10, and the reauthorization checkpoint on or after 10-26 |
-| Voice spike | `docs/voice-spike-report.md` (paid test calls, approved per call) | §27 R4–R6, R13–R15 |
-| Agent evals | `pnpm eval:agent` (paid, run only with approval) | §13.4 |
+| Layer         | Tooling                                                                                                                                                                                         | What                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit          | Vitest project `unit` (parallel)                                                                                                                                                                | State machine and flag tables, rank property (fast-check), pricing, payout and invoice math, reauth scheduling, slot generation (incl. the US DST change on 11-01), token purposes, webhook verification (generated RSA cert, unsigned CRC32, look-alike hosts, userinfo URLs, wrong path, oversized and non-UTF-8 bodies), PayPal client (request-ID spy, retries, 409, error mapping), external-ID prefixes, env/config check |
+| Integration   | Vitest project `integration` with `fileParallelism: false`. `globalSetup` runs the **production migrator** (including the trigger) on `DATABASE_URL_TEST`. Each test creates its own workspace. | Every payment path through the service layer with fake PayPal; DB trigger; ledger concurrency; webhook route (forged → 4xx, nothing stored); Vapi fixtures (recorded payloads); proxy body rewrite; caps                                                                                                                                                                                                                        |
+| E2E           | `pnpm test:e2e` (Playwright), with `PAYPAL_MODE=mock` and a fake LLM. Separate from `pnpm test`.                                                                                                | `/try` → chat → booking → pay panel → authorized → auto-confirmation → dashboard Job done → captured → paid_out                                                                                                                                                                                                                                                                                                                 |
+| Sandbox smoke | `pnpm sandbox:smoke` and `/lab/paypal` (manual, real sandbox, free)                                                                                                                             | §27 R1–R3, R10, and the reauthorization checkpoint on or after 10-26                                                                                                                                                                                                                                                                                                                                                            |
+| Voice spike   | `docs/voice-spike-report.md` (paid test calls, approved per call)                                                                                                                               | §27 R4–R6, R13–R15                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Agent evals   | `pnpm eval:agent` (paid, run only with approval)                                                                                                                                                | §13.4                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 **Payment test matrix** (each item is an automated integration test)
 
@@ -1214,7 +1214,7 @@ services:
     plan: 0.5c-512mb
     region: oregon
     buildCommand: pnpm install --frozen-lockfile && pnpm build
-    preDeployCommand: pnpm db:migrate && pnpm db:seed   # seed = insert-if-missing (main workspace)
+    preDeployCommand: pnpm db:migrate && pnpm db:seed # seed = insert-if-missing (main workspace)
     startCommand: pnpm start
     healthCheckPath: /api/health
     envVars:
@@ -1247,7 +1247,7 @@ databases:
     region: oregon
     postgresMajorVersion: "18"
     diskSizeGB: 1
-    ipAllowList: []          # private network only
+    ipAllowList: [] # private network only
 ```
 
 **Further rules**
@@ -1270,83 +1270,92 @@ databases:
 
 ## 27. Risks and verification points
 
-| # | Risk / unknown | Plan | Stage |
-|---|---|---|---|
-| R1 | Partial capture not enabled for PayPal-wallet authorizations | Test it; the user enables it on the US business account. Fallback: void + fee invoice. | 2 |
-| R2 | `final_capture: true` doesn't release the remainder | GET after the capture; void the parent if needed | 2 |
-| R3 | Reauthorization, real behavior | Authorizations created in stage 2 and left open. On or after 10-26: reauthorize, capture the child, try to void the child (expect `CANNOT_BE_VOIDED`), void another parent | 2, 6 |
-| R4 | `monitor.controlUrl` for web calls (missing in the `/call/web` response?) | Fall back to `GET /call/{id}`, then the browser `say` fallback | 4 |
-| R5 | Call `type` enum and payload fields | Record fixtures in the spike | 4 |
-| R6 | Gemini on Vapi: latency, tool-call quality, thinking defaults | Measured comparison of 2–3 models (paid, approved), plus explicit `maxTokens` and `temperature` | 4 |
-| R7 | Vapi credit runs out during judging | The user's budget decision, caps, chat fallback, auto-reload off | 4, 8 |
-| R8 | ~~TypeScript 7 tooling~~ | **Decided:** TS 6.0.3 | — |
-| R9 | Next 16.4 scaffold defaults | `--no-cache-components --no-agent-feedback`, `force-dynamic` layouts | 1 |
-| R10 | Sandbox merchant country | **US** business account created *before* the REST app, which is a Merchant app linked to it. Stage 2 checks that payee country = US and currency = USD. | 2 |
-| R11 | Bryntum trial clock | Start no earlier than 11-01; ask in Discord | 10 |
-| R12 | Pay popup during a call | `popup` mode, QR / new-tab fallback, device matrix | 5, 11 |
-| R13 | Web SDK 3.0.0 proxy base URL | Spike; fallback 2.7.1 | 4 |
-| R14 | `silenceTimeoutSeconds` / hooks accepted by the API | Set through a cast, then GET to confirm | 4 |
-| R15 | Speech latency of the `say` push | Measure, target ≤ 2 s | 4, 8 |
-| R16 | Render `X-Forwarded-For` semantics | Forged-header test | 1 |
-| R17 | Cron `fromService` wiring | Deployed tick returns 200; `last_tick_at` in health | 1 |
-| R18 | Gemini thought signatures in the chat history | Store raw `Content[]`, or use the Interactions API; fixture test | 7 |
-| R19 | Resend reputation on the user's domain | Opt-in, caps, suppression, auto-pause, subdomain | 8 |
-| R20 | Serial OK gates eat into the buffer | Feature freeze 11-07, fallback video take after the slice, user may batch approvals | all |
+| #   | Risk / unknown                                                            | Plan                                                                                                                                                                       | Stage |
+| --- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| R1  | Partial capture not enabled for PayPal-wallet authorizations              | Test it; the user enables it on the US business account. Fallback: void + fee invoice.                                                                                     | 2     |
+| R2  | `final_capture: true` doesn't release the remainder                       | GET after the capture; void the parent if needed                                                                                                                           | 2     |
+| R3  | Reauthorization, real behavior                                            | Authorizations created in stage 2 and left open. On or after 10-26: reauthorize, capture the child, try to void the child (expect `CANNOT_BE_VOIDED`), void another parent | 2, 6  |
+| R4  | `monitor.controlUrl` for web calls (missing in the `/call/web` response?) | Fall back to `GET /call/{id}`, then the browser `say` fallback                                                                                                             | 4     |
+| R5  | Call `type` enum and payload fields                                       | Record fixtures in the spike                                                                                                                                               | 4     |
+| R6  | Gemini on Vapi: latency, tool-call quality, thinking defaults             | Measured comparison of 2–3 models (paid, approved), plus explicit `maxTokens` and `temperature`                                                                            | 4     |
+| R7  | Vapi credit runs out during judging                                       | The user's budget decision, caps, chat fallback, auto-reload off                                                                                                           | 4, 8  |
+| R8  | ~~TypeScript 7 tooling~~                                                  | **Decided:** TS 6.0.3                                                                                                                                                      | —     |
+| R9  | Next 16.4 scaffold defaults                                               | `--no-cache-components --no-agent-feedback`, `force-dynamic` layouts                                                                                                       | 1     |
+| R10 | Sandbox merchant country                                                  | **US** business account created _before_ the REST app, which is a Merchant app linked to it. Stage 2 checks that payee country = US and currency = USD.                    | 2     |
+| R11 | Bryntum trial clock                                                       | Start no earlier than 11-01; ask in Discord                                                                                                                                | 10    |
+| R12 | Pay popup during a call                                                   | `popup` mode, QR / new-tab fallback, device matrix                                                                                                                         | 5, 11 |
+| R13 | Web SDK 3.0.0 proxy base URL                                              | Spike; fallback 2.7.1                                                                                                                                                      | 4     |
+| R14 | `silenceTimeoutSeconds` / hooks accepted by the API                       | Set through a cast, then GET to confirm                                                                                                                                    | 4     |
+| R15 | Speech latency of the `say` push                                          | Measure, target ≤ 2 s                                                                                                                                                      | 4, 8  |
+| R16 | Render `X-Forwarded-For` semantics                                        | Forged-header test                                                                                                                                                         | 1     |
+| R17 | Cron `fromService` wiring                                                 | Deployed tick returns 200; `last_tick_at` in health                                                                                                                        | 1     |
+| R18 | Gemini thought signatures in the chat history                             | Store raw `Content[]`, or use the Interactions API; fixture test                                                                                                           | 7     |
+| R19 | Resend reputation on the user's domain                                    | Opt-in, caps, suppression, auto-pause, subdomain                                                                                                                           | 8     |
+| R20 | Serial OK gates eat into the buffer                                       | Feature freeze 11-07, fallback video take after the slice, user may batch approvals                                                                                        | all   |
 
 ---
 
 ## 28. Assumptions and defaults (please review)
 
-| Topic | Default |
-|---|---|
-| Demo business | US, USD, `America/Chicago`, labelled "Austin time (CT)" |
-| Hold amount | The full fixed price of the service |
-| No-show fee | Fixed per service (seed: $49–$79) |
-| Late cancellation | Free ≥ 24 h before. Later → the no-show fee is captured and the rest released. |
-| Unpaid link | The slot is held for 60 min (+10 min grace for an approval already under way), then `expired` |
-| Stale hold | Released 72 h after the slot ends if nothing happened |
-| Booking window | ≤ 14 days ahead; at most one reauthorization |
-| Technician share | 60% of every main capture and every paid invoice, paid out automatically |
-| Extra work | Only items from the add-on catalogue, quantity 1–20, total ≤ $2,000, within 14 days |
-| Voice | Browser calls are required; phone is a US bonus. Calls are capped at 480 s for now (set from measurement). |
-| Region | Render `oregon` (final) |
+| Topic             | Default                                                                                                    |
+| ----------------- | ---------------------------------------------------------------------------------------------------------- |
+| Demo business     | US, USD, `America/Chicago`, labelled "Austin time (CT)"                                                    |
+| Hold amount       | The full fixed price of the service                                                                        |
+| No-show fee       | Fixed per service (seed: $49–$79)                                                                          |
+| Late cancellation | Free ≥ 24 h before. Later → the no-show fee is captured and the rest released.                             |
+| Unpaid link       | The slot is held for 60 min (+10 min grace for an approval already under way), then `expired`              |
+| Stale hold        | Released 72 h after the slot ends if nothing happened                                                      |
+| Booking window    | ≤ 14 days ahead; at most one reauthorization                                                               |
+| Technician share  | 60% of every main capture and every paid invoice, paid out automatically                                   |
+| Extra work        | Only items from the add-on catalogue, quantity 1–20, total ≤ $2,000, within 14 days                        |
+| Voice             | Browser calls are required; phone is a US bonus. Calls are capped at 480 s for now (set from measurement). |
+| Region            | Render `oregon` (final)                                                                                    |
 
 ---
 
 ## 29. Sources (checked 2026-10-20)
 
 **PayPal**
+
 - developer.paypal.com: `/sdk/js/set-up`, `/sdk/js/reference`, `/v4-v6`, `/checkout/delay-capture`, `/payment-methods/auth-honor`, `/checkout/extend-authorization`
 - OpenAPI schemas: Orders 2.36, Payments 2.12, Invoicing 2.12.0, Payouts 1.9, Webhooks 1.11
 - `/api/rest/reference/idempotency`, `/api/rest/webhooks/rest`, `/api/rest/webhooks/event-names`, `/negative-testing/request-headers`, `/payouts/use-payouts/set-up`, `/invoicing/troubleshooting`
 
 **Vapi**
+
 - docs.vapi.ai: `/server-url/server-authentication`, `/tools/custom-tools`, `/server-url/events`, `/calls/call-features`, `/security-and-privacy/api-keys`, `/security-and-privacy/proxy-server`, `/customization/jwt-authentication`, `/free-telephony`, `/providers/model/gemini`, `/assistants/idle-messages`, `/assistants/assistant-hooks`, `/assistants/call-recording`, `/assistants/retrieve-call-artifacts`, `/calls/call-concurrency`, call-timeout-settings
 - api.vapi.ai/api-json
 - vapi.ai/pricing
 
 **Gemini**
+
 - ai.google.dev/gemini-api/docs: `/models`, `/function-calling`, `/generate-content/thought-signatures`, `/thinking`, `/structured-output`, `/pricing`, `/billing`, `/terms`
 
 **Render**
+
 - render.com/docs: `/blueprint-spec`, `/free`, `/cronjobs`, `/deploys`, `/health-checks`, `/node-version`, `/native-runtimes`, `/environment-variables`, `/private-network`, `/pricing`
 
 **Resend**
+
 - resend.com/docs: api-reference send-email, account quotas
 - resend.com/legal/acceptable-use
 
 **Next.js**
+
 - nextjs.org: `/docs/app/guides/upgrading/version-16`, `/blog/next-16-4`, `/blog/nextjs-security-update-october-14-2026`, `/docs/app/guides/data-security`, `/docs/app/guides/content-security-policy`, `/docs/app/api-reference/config/typescript`
 
 **Tooling**
+
 - typescript-eslint.io/users/dependency-versions
 - pnpm.io/settings/build
 - vitest.dev/config/fileparallelism
 - orm.drizzle.team: `/docs/kit-custom-migrations`
 
 **Bryntum**
+
 - npm `@bryntum/scheduler-trial@7.3.7`, `@bryntum/scheduler-react@7.3.7`
 - bryntum.com/products/schedulerpro/scheduler-vs-schedulerpro
 
 **Hackathon**
+
 - paypalaihackathon.devpost.com: `/rules`, `/details/bryntum`, `/details/render`, `/resources`

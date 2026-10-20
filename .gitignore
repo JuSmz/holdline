@@ -2,15 +2,22 @@
 .env
 .env.*
 !.env.example
+*.pem
 
 # deps & build
 node_modules/
+.pnp
+.pnp.*
 .next/
 out/
+build/
 dist/
 coverage/
 *.tsbuildinfo
 next-env.d.ts
+
+# local postgres (scripts/local-db.sh)
+.pg/
 
 # tests
 playwright-report/
@@ -19,4 +26,5 @@ test-results/
 # misc
 .DS_Store
 *.log
+.pnpm-debug.log*
 .vercel

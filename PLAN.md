@@ -14,21 +14,21 @@ The work is built in small stages. **Every stage ends the same way:**
 
 **Dates are targets.** Submission closes **Thu 2026-11-12, 21:00 CET**. Our own submit date is **11-11**. Feature freeze is **11-07**.
 
-| # | Stage | Target | Why here |
-|---|---|---|---|
-| 0 | Spec and plan | 10-20 | — |
-| 1 | Skeleton and first Render deploy | 10-21 | Gets the public URL that the webhooks need |
-| 2 | PayPal spike A: Orders and Payments, webhooks | 10-22/23 | The authorize, capture and void facts the design rests on |
-| 3 | PayPal spike B: Payouts, Invoicing, sandbox report | 10-23/24 | Covers the remaining money APIs early |
-| 4 | **Voice spike (Vapi)**: proxy call, `say` mid-call, silence, model choice | 10-24/25 | Tests the riskiest unknowns early instead of on 11-02 |
-| 5 | Domain model and state machine | 10-26 | |
-| 6 | Payment service, webhooks and jobs, plus the real-sandbox reauthorization check | 10-28 | |
-| 7 | **Vertical slice**: chat and web call → booking → pay → agent confirms → owner buttons | 11-01 | The video moment works end to end. **Fallback video take afterwards.** |
-| 8 | Voice and email for production: phone path, claims, caps, live Resend | 11-03 | |
-| 9 | `/try` polish and dashboard | 11-05 | |
-| 10 | Bryntum Scheduler (trial started **≥ 11-01**) | 11-06 | |
-| 11 | Hardening, then **feature freeze 11-07** | 11-07 | |
-| 12 | Launch kit: README, final video (by 11-09), Devpost text, final deploy | 11-09 → submit 11-11 | |
+| #   | Stage                                                                                  | Target               | Why here                                                               |
+| --- | -------------------------------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------- |
+| 0   | Spec and plan                                                                          | 10-20                | —                                                                      |
+| 1   | Skeleton and first Render deploy                                                       | 10-21                | Gets the public URL that the webhooks need                             |
+| 2   | PayPal spike A: Orders and Payments, webhooks                                          | 10-22/23             | The authorize, capture and void facts the design rests on              |
+| 3   | PayPal spike B: Payouts, Invoicing, sandbox report                                     | 10-23/24             | Covers the remaining money APIs early                                  |
+| 4   | **Voice spike (Vapi)**: proxy call, `say` mid-call, silence, model choice              | 10-24/25             | Tests the riskiest unknowns early instead of on 11-02                  |
+| 5   | Domain model and state machine                                                         | 10-26                |                                                                        |
+| 6   | Payment service, webhooks and jobs, plus the real-sandbox reauthorization check        | 10-28                |                                                                        |
+| 7   | **Vertical slice**: chat and web call → booking → pay → agent confirms → owner buttons | 11-01                | The video moment works end to end. **Fallback video take afterwards.** |
+| 8   | Voice and email for production: phone path, claims, caps, live Resend                  | 11-03                |                                                                        |
+| 9   | `/try` polish and dashboard                                                            | 11-05                |                                                                        |
+| 10  | Bryntum Scheduler (trial started **≥ 11-01**)                                          | 11-06                |                                                                        |
+| 11  | Hardening, then **feature freeze 11-07**                                               | 11-07                |                                                                        |
+| 12  | Launch kit: README, final video (by 11-09), Devpost text, final deploy                 | 11-09 → submit 11-11 |                                                                        |
 
 ---
 
@@ -36,29 +36,29 @@ The work is built in small stages. **Every stage ends the same way:**
 
 Do these early. None of them depend on code, and several take time to become active.
 
-| When | What | Notes |
-|---|---|---|
-| Stage 1 | Claim the Render hackathon credit ($50) | Link from the Devpost resources |
-| Stage 1 | Create the GitHub repo | Either run `gh auth login` so I create it, or create it yourself and send me the URL. It can stay private until submission. |
-| Before stage 2 | **PayPal sandbox, in this order:** | All of these are sandbox accounts. |
-| | 1. US business account | With a large USD balance. Enable partial capture if the setting exists. |
-| | 2. 4–6 US personal buyer accounts | For judges. Their logins are shown publicly, which is fine for sandbox. |
-| | 3. 2 US personal accounts for Maya and Luis | Payout receivers |
-| | 4. **Then** the REST app, type **Merchant**, linked to that US business account | Enable negative testing on the business account (optional) |
-| Before stage 4 | **Vapi:** account and private key, then delete the public key or restrict it to no assistants | |
-| Before stage 4 | **Vapi budget decision** | Amount, **auto-reload off**, and the split into a development and a judging budget |
-| Before stage 4 | Vapi free US number (optional) | US bonus only |
-| Before stage 7 | **Gemini:** AI Studio project with billing, an API key, and a **monthly spend cap or prepay** | |
-| Before stage 8 | **Resend:** account, domain `mail.<your-domain>` with the DNS records I'll give you (SPF/DKIM/DMARC), webhook for bounces and complaints | Start DNS early: propagation takes time |
-| Any time | Ask Bryntum in the hackathon Discord how the 45-day npm trial clock is counted | |
-| Stage 10 (≥ 11-01) | Start the Bryntum trial | |
-| Optional | Node 24 locally (`brew install node@24`) to match Render; an HTTPS tunnel for local webhook tests | Your decision. Not required. |
+| When               | What                                                                                                                                     | Notes                                                                                                                       |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Stage 1            | Claim the Render hackathon credit ($50)                                                                                                  | Link from the Devpost resources                                                                                             |
+| Stage 1            | Create the GitHub repo                                                                                                                   | Either run `gh auth login` so I create it, or create it yourself and send me the URL. It can stay private until submission. |
+| Before stage 2     | **PayPal sandbox, in this order:**                                                                                                       | All of these are sandbox accounts.                                                                                          |
+|                    | 1. US business account                                                                                                                   | With a large USD balance. Enable partial capture if the setting exists.                                                     |
+|                    | 2. 4–6 US personal buyer accounts                                                                                                        | For judges. Their logins are shown publicly, which is fine for sandbox.                                                     |
+|                    | 3. 2 US personal accounts for Maya and Luis                                                                                              | Payout receivers                                                                                                            |
+|                    | 4. **Then** the REST app, type **Merchant**, linked to that US business account                                                          | Enable negative testing on the business account (optional)                                                                  |
+| Before stage 4     | **Vapi:** account and private key, then delete the public key or restrict it to no assistants                                            |                                                                                                                             |
+| Before stage 4     | **Vapi budget decision**                                                                                                                 | Amount, **auto-reload off**, and the split into a development and a judging budget                                          |
+| Before stage 4     | Vapi free US number (optional)                                                                                                           | US bonus only                                                                                                               |
+| Before stage 7     | **Gemini:** AI Studio project with billing, an API key, and a **monthly spend cap or prepay**                                            |                                                                                                                             |
+| Before stage 8     | **Resend:** account, domain `mail.<your-domain>` with the DNS records I'll give you (SPF/DKIM/DMARC), webhook for bounces and complaints | Start DNS early: propagation takes time                                                                                     |
+| Any time           | Ask Bryntum in the hackathon Discord how the 45-day npm trial clock is counted                                                           |                                                                                                                             |
+| Stage 10 (≥ 11-01) | Start the Bryntum trial                                                                                                                  |                                                                                                                             |
+| Optional           | Node 24 locally (`brew install node@24`) to match Render; an HTTPS tunnel for local webhook tests                                        | Your decision. Not required.                                                                                                |
 
 You enter every secret yourself: in `.env` locally, and by hand in the Render dashboard. I only name the variable and where it comes from.
 
 ---
 
-## Stage 0: Spec and plan *(this commit)*
+## Stage 0: Spec and plan _(this commit)_
 
 - `SPEC.md` v0.2, revised after the multi-lens review, and `PLAN.md`. `git init` and the first local commit.
 - **Done when:** you have reviewed both and approved stage 1.
@@ -70,20 +70,20 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
 - **Scaffold:**
   - Command: `pnpm create next-app@16.4.2 --ts --tailwind --eslint --app --src-dir --use-pnpm --no-cache-components --no-agent-feedback`.
   - Check that `cacheComponents` and `partialPrefetching` are both absent.
-  - Pin `next@16.4.2`, `typescript@6.0.3` and `@types/node@^24`.
+  - Pin `next@16.4.2`, `typescript@6.0.3` and `@types/node@24.19.2` (all versions pinned exactly).
   - Set `"types": ["node"]` and `engines >=24 <27`.
   - Pin `.node-version` to `24.21.0`.
   - Keep the `packageManager` field. Commit `pnpm-workspace.yaml` with `allowBuilds`.
-- **UI base:** shadcn/ui init, design tokens (black and white, `#0A5CFF` accent), Geist, the base layout and the footer "Not affiliated with PayPal". A landing placeholder with the wordmark.
+- **UI base:** shadcn/ui init, design tokens (black and white, `#0A5CFF` accent), Geist (self-hosted via the `geist` package), the base layout and the footer "Not affiliated with PayPal". A landing placeholder with the wordmark.
 - **Database:**
   - Drizzle 0.45 with postgres.js (pool max 5) and a `force-dynamic` layout pattern.
   - First migration: `workspaces` and `app_meta`.
   - `scripts/migrate.ts` (the same migrator for prod and tests) and an idempotent `scripts/seed.ts` that inserts the main workspace if it is missing.
 - **Config:** zod env schema with capability flags, the fatal sandbox guard, `APP_URL ?? RENDER_EXTERNAL_URL`, and secret length checks.
 - **Endpoints:**
-  - `/api/health`: version, `RENDER_GIT_COMMIT`, DB ping, `last_tick_at`.
-  - `/api/jobs/tick`: Bearer check; for now it only writes `last_tick_at`.
-  - A temporary **XFF probe** that logs the forwarding headers, to check Render's `X-Forwarded-For` behavior (R16).
+  - `/api/health`: version, `RENDER_GIT_COMMIT`, DB ping, `lastTickAt`.
+  - `/api/jobs/tick`: Bearer check; for now it only records the heartbeat.
+  - A temporary **XFF probe** (`/api/probe/forwarded`) that echoes the caller's forwarding headers, to check Render's `X-Forwarded-For` behavior with a forged header (R16). **Deleted in stage 2.**
 - **Tooling:** ESLint (flat config), Prettier, Vitest projects `unit` and `integration` (with globalSetup running the migrator against local Postgres 18), and the scripts `lint`, `typecheck`, `test` and `build`.
 - **Deploy and repo files:**
   - `render.yaml` as in SPEC §26: web, Postgres and cron with `fromService` wiring. **Every future `sync: false` key is declared now.**
@@ -97,13 +97,15 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
 **What you do:** claim the credit, create the GitHub repo, **OK the first push**, then Render → New → Blueprint → choose the repo and leave the later secrets empty.
 
 **Done when:**
-- `https://<app>.onrender.com/api/health` returns `{ ok: true, db: "up" }`, **and `last_tick_at` is under 10 minutes old**, which proves the cron reaches the web service over the private network.
+
+- `https://<app>.onrender.com/api/health` returns `{ ok: true, db: "up" }`, **and `lastTickAt` is under 10 minutes old**, which proves the cron reaches the web service over the private network.
 - The XFF result is recorded.
 
 ## Stage 2: PayPal spike A (Orders, Payments, webhooks)
 
 **Build**
 
+- **Housekeeping:** delete the stage-1 XFF probe (`/api/probe/forwarded`) and put the recorded result into the client-IP helper.
 - **`src/server/paypal`:**
   - client: OAuth cache, `post()` that **requires** a request ID, `APP_INSTANCE_ID` prefixes, a 15 s timeout, retries with the same ID (including 409 in progress), `PayPalApiError`, the "already done" mapping, and `paypal_api_log`
   - `orders.ts` and `payments.ts`
@@ -126,6 +128,7 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
 **What you do:** the PayPal accounts in the order of the checklist; `PAYPAL_*` into `.env` and Render; **OK the push**. Then approve with a sandbox buyer in the lab: you enter the sandbox login unless you tell me otherwise.
 
 **Done when:**
+
 - authorize, full capture, partial capture + final and void have all succeeded in the sandbox
 - the partial-capture setting and the remainder behavior are recorded (R1, R2)
 - a verified webhook has arrived on Render
@@ -295,7 +298,7 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
 
 **Done when:** every action works on Render against the sandbox, and payouts arrive in Maya's and Luis's sandbox accounts.
 
-## Stage 10: Bryntum Scheduler *(trial started ≥ 2026-11-01)*
+## Stage 10: Bryntum Scheduler _(trial started ≥ 2026-11-01)_
 
 **Build**
 
@@ -347,6 +350,7 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
   - No music, or royalty-free music only.
   - Only text names for Vapi, Google and Bryntum.
   - The Sandbox label stays visible, and time cuts are captioned.
+
 - **Devpost text** (draft by 11-09). Check that GitHub detects the license.
 - **Final checklist:** `LAB_ENABLED=false`, buyer logins checked, a runbook for resetting a buyer password, the final deploy (**OK the push**) and the smoke test.
 

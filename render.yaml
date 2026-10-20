@@ -1,0 +1,124 @@
+# Holdline — Render Blueprint (SPEC §26).
+# Paid plans, covered by the PayPal AI Hackathon Render credit. Region is final (can't change later).
+# Secrets marked `sync: false` are entered by hand in the Render dashboard; leave them empty
+# until the stage that needs them. Render ignores sync:false keys added to an existing
+# Blueprint later, so every future key is declared here up front.
+
+services:
+  - type: web
+    name: holdline-web
+    runtime: node
+    plan: 0.5c-512mb
+    region: oregon
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    preDeployCommand: pnpm db:migrate && pnpm db:seed
+    startCommand: pnpm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: holdline-db
+          property: connectionString
+      # generated once by Render (256-bit, base64)
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: CRON_SECRET
+        generateValue: true
+      # fixed, non-secret values
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_MODE
+        value: live
+      - key: APP_INSTANCE_ID
+        value: p1
+      - key: LAB_ENABLED
+        value: "false"
+      - key: VAPI_LLM_PROVIDER
+        value: google
+      - key: VAPI_LLM_MAX_TOKENS
+        value: "1000"
+      - key: VAPI_LLM_TEMPERATURE
+        value: "1.0"
+      - key: VAPI_MAX_CALL_SECONDS
+        value: "480"
+      # entered by hand, stage by stage (leave empty for now)
+      - key: APP_URL # optional; the code falls back to RENDER_EXTERNAL_URL
+        sync: false
+      - key: OWNER_PHONE
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_BUSINESS_EMAIL
+        sync: false
+      - key: SANDBOX_BUYERS
+        sync: false
+      - key: TECH_PAYOUT_EMAIL_MAYA
+        sync: false
+      - key: TECH_PAYOUT_EMAIL_LUIS
+        sync: false
+      - key: VAPI_PRIVATE_KEY
+        sync: false
+      - key: VAPI_ASSISTANT_ID
+        sync: false
+      - key: VAPI_WEBHOOK_SECRET
+        sync: false
+      - key: VAPI_PHONE_NUMBER
+        sync: false
+      - key: VAPI_LLM_MODEL
+        sync: false
+      - key: DEMO_DAILY_VOICE_MINUTES
+        sync: false
+      - key: DEMO_DAILY_PHONE_MINUTES
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_CHAT_MODEL
+        sync: false
+      - key: GEMINI_SUMMARY_MODEL
+        sync: false
+      - key: GEMINI_DAILY_BUDGET_CENTS
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+  # Runs the job tick every 5 minutes over Render's private network.
+  - type: cron
+    name: holdline-tick
+    runtime: node
+    region: oregon
+    schedule: "*/5 * * * *"
+    buildCommand: "true"
+    startCommand: >-
+      curl -fsS --max-time 240 -X POST
+      -H "Authorization: Bearer $CRON_SECRET"
+      "http://$WEB_HOSTPORT/api/jobs/tick"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: holdline-web
+          envVarKey: CRON_SECRET
+      - key: WEB_HOSTPORT
+        fromService:
+          type: web
+          name: holdline-web
+          property: hostport
+
+databases:
+  - name: holdline-db
+    plan: 0.1c-256mb
+    region: oregon
+    postgresMajorVersion: "18"
+    diskSizeGB: 1
+    ipAllowList: [] # private network only
