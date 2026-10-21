@@ -8,6 +8,13 @@
       "when": 1792456837229,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792597987173,
+      "tag": "0001_paypal_log_webhooks_sessions",
+      "breakpoints": true
     }
   ]
 }

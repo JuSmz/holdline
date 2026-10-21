@@ -116,7 +116,7 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
   - buttons: Capture full, Capture partial + `final_capture` (then a GET), Void, Reauthorize (expects `REAUTHORIZATION_TOO_SOON`), Negative test (declined via `PayPal-Mock-Response`)
   - **Create 3 extra authorizations and leave them open** for the real reauthorization check on or after 10-26
   - the result of each call: status, IDs, `debug_id`
-- **Payee check:** the order shows payee country US and currency USD.
+- **Payee check (R10):** the lab shows whether the order's payee email equals `PAYPAL_BUSINESS_EMAIL`; the account country is checked in the Developer Dashboard; the capture's `seller_receivable_breakdown` must be plain USD (no exchange rate, not `PENDING`).
 
 **Tests (unit, mocked fetch)**
 
@@ -211,7 +211,7 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
   - `markJobDone`, `markNoShow`, `waiveFee`, `cancelBooking`
   - `billExtraWork`, `billViaInvoice` (void first), `requestReapproval`
   - payouts with the natural key
-- **Webhook processing:** dedupe, re-GET, CAS, then processed.
+- **Webhook processing:** dedupe, re-GET, CAS, then processed. Rows with `simulated = true` (lab simulator events) are never processed — they are marked processed on arrival or skipped.
 - **Jobs behind `/api/jobs/tick`, in SPEC §12 order:** reconcile, outbox, expire, reauthorize, stale holds, payouts, summaries, retention.
 - **Fake PayPal** (`PAYPAL_MODE=mock`) with scriptable outcomes.
 - **Real reauthorization check on or after 10-26** with the open authorizations from stage 2: reauthorize, capture the child, try to void the child (expect `CANNOT_BE_VOIDED`), void another parent. The results go into the sandbox report (R3).

@@ -34,8 +34,6 @@ services:
         value: live
       - key: APP_INSTANCE_ID
         value: p1
-      - key: LAB_ENABLED
-        value: "false"
       - key: VAPI_LLM_PROVIDER
         value: google
       - key: VAPI_LLM_MAX_TOKENS
@@ -45,6 +43,8 @@ services:
       - key: VAPI_MAX_CALL_SECONDS
         value: "480"
       # entered by hand, stage by stage (leave empty for now)
+      - key: LAB_ENABLED # "true" only during the sandbox spikes (stages 2-4); must be "false" or empty at submission
+        sync: false
       - key: APP_URL # optional; the code falls back to RENDER_EXTERNAL_URL
         sync: false
       - key: OWNER_PHONE

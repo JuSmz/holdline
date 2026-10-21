@@ -651,10 +651,10 @@ PayPal keeps request IDs for **≥ 6 h**; the docs contradict each other, so we 
 
 1. **Reject bodies over 64 KB** (`Content-Length` check plus a streaming cap). Read the raw **bytes**, and require all five `paypal-*` headers.
 2. **Offline verification**, the method PayPal prefers:
-   - Parse `paypal-cert-url` with `new URL()`. It must be `https:`, have the exact host `api.sandbox.paypal.com` (sandbox only), no userinfo or port, and a path starting with `/v1/notifications/certs/`.
+   - Parse `paypal-cert-url` with `new URL()`. It must be `https:`, have an exact sandbox API host, no userinfo, port, query or fragment, and a path matching `/v1/notifications/certs/CERT-…`.
    - Fetch it with `redirect: "error"` and a 3 s timeout. Cache at most 8 certs and check their validity dates.
    - Verify **RSA-SHA256**, pinned (the `paypal-auth-algo` header is ignored), over `transmission_id|transmission_time|PAYPAL_WEBHOOK_ID|crc32(bytes)>>>0`, the unsigned decimal CRC32 from `zlib.crc32`.
-   - **Only when the cert fetch fails:** `POST /v1/notifications/verify-webhook-signature`.
+   - **Only when fetching an allowed cert fails transiently** (network, timeout, 5xx): `POST /v1/notifications/verify-webhook-signature`, sending the event **byte-for-byte**, rate-limited (30/min, else 503 so PayPal retries). A disallowed host, a 4xx or an unparsable cert is a hard 400; failing cert URLs are negative-cached for 5 minutes. Allowed hosts: `api.sandbox.paypal.com` and `api-m.sandbox.paypal.com`; the host seen in real events is recorded in the sandbox report.
    - **Simulator events** (webhook ID `WEBHOOK_ID`) are accepted only when `LAB_ENABLED=true`, and are stored with `simulated=true`.
    - **On failure:** respond 400 and **store nothing**. Log only the IP hash.
 3. **Dedup:** `INSERT webhook_events … ON CONFLICT (paypal_event_id) DO NOTHING`.
@@ -1051,7 +1051,7 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
 - **Recordings are off** (`artifactPlan.recordingEnabled: false`) on every channel. There is no `recording_url`.
 - **Disclosure:** the first message says it is a demo line, that calls are transcribed, and asks callers to use made-up details. `/try` says the same.
 - **PII purge after 14 days** in **all** workspaces, main included:
-  - purged: customer data, transcript, messages, summary text, email addresses
+  - purged: customer data, transcript, messages, summary text, email addresses, and the raw payloads in `webhook_events.raw` (they can carry payer details)
   - kept: aggregates and PayPal IDs
   - Reset hard-deletes PII.
   - A final full purge runs after 2026-12-15.

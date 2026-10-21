@@ -84,12 +84,9 @@ export function readSecret(env: Env, name: string): string | undefined {
 type Requirement = { name: string; secret?: boolean };
 
 const INTEGRATIONS = {
-  paypal: [
-    { name: "PAYPAL_CLIENT_ID" },
-    { name: "PAYPAL_CLIENT_SECRET" },
-    { name: "PAYPAL_WEBHOOK_ID" },
-    { name: "PAYPAL_BUSINESS_EMAIL" },
-  ],
+  paypal: [{ name: "PAYPAL_CLIENT_ID" }, { name: "PAYPAL_CLIENT_SECRET" }],
+  paypalWebhooks: [{ name: "PAYPAL_WEBHOOK_ID" }],
+  paypalInvoicing: [{ name: "PAYPAL_BUSINESS_EMAIL" }],
   vapi: [
     { name: "VAPI_PRIVATE_KEY" },
     { name: "VAPI_ASSISTANT_ID" },

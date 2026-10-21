@@ -32,11 +32,10 @@ describe("loadBootConfig (sandbox guard)", () => {
 
 describe("integrations", () => {
   it("are disabled unless every variable is present", () => {
-    const partial = { PAYPAL_CLIENT_ID: "id", PAYPAL_CLIENT_SECRET: "secret" };
-    expect(isEnabled("paypal", partial)).toBe(false);
-    expect(isEnabled("paypal", { ...partial, PAYPAL_WEBHOOK_ID: "wh", PAYPAL_BUSINESS_EMAIL: "biz@example.com" })).toBe(
-      true,
-    );
+    expect(isEnabled("paypal", { PAYPAL_CLIENT_ID: "id" })).toBe(false);
+    expect(isEnabled("paypal", { PAYPAL_CLIENT_ID: "id", PAYPAL_CLIENT_SECRET: "secret" })).toBe(true);
+    expect(isEnabled("paypalWebhooks", { PAYPAL_CLIENT_ID: "id", PAYPAL_CLIENT_SECRET: "secret" })).toBe(false);
+    expect(isEnabled("paypalWebhooks", { PAYPAL_WEBHOOK_ID: "1JE4291016473214C" })).toBe(true);
   });
 
   it("treat short or blank secrets as missing", () => {

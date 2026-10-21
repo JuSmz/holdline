@@ -23,10 +23,12 @@
     "db:local:stop": "scripts/local-db.sh stop",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
-    "db:seed": "tsx --env-file-if-exists=.env scripts/seed.ts"
+    "db:seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
+    "paypal:webhook:setup": "tsx --env-file-if-exists=.env scripts/paypal-webhook-setup.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
+    "@paypal/react-paypal-js": "10.6.0",
     "class-variance-authority": "0.7.1",
     "cn": "0.5.0",
     "drizzle-orm": "0.45.4",
