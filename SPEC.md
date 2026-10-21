@@ -817,11 +817,12 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
   - `gemini-3.1-flash-lite`, `gemini-3.5-flash` (Google now routes it to 3.6): both are in Vapi's documented table
   - `gemini-3.8-flash`: in Vapi's API enum but not in the docs table
 - **The choice is made by measurement** in the voice spike (stage 4): p50/p95 turn latency, tool-call success, and empty or cut-off turns. If results are close, prefer a documented model.
+- **Chosen (spike, 2026-10-21): `gemini-3.5-flash`.** Model latency 0.7–0.9 s, turn latency p50 about 1.9 s, correct hold wording. `gemini-3.1-flash-lite` was faster (model 0.5 s, turn 1.4 s) but misstated the hold ("isn't a charge … unless there's a no-show"). Cost about $0.09 per minute. Details: `docs/voice-spike-report.md`.
 - Billing runs through Vapi's default integration, paid from Vapi credit.
 
 ### 14.3 Web calls through our server proxy
 
-1. **Browser:** `new Vapi("proxy", APP_URL + "/api/vapi-proxy")`, then `vapi.start()`. **VERIFY** in the spike that SDK 3.0.0 accepts a base URL; the fallback is 2.7.1.
+1. **Browser:** `new Vapi("proxy", APP_URL + "/api/vapi-proxy")`, then `vapi.start()`. Verified in the spike (2026-10-21): SDK 3.0.0 accepts the base URL and posts `/call/web` to our proxy.
 2. **`POST /api/vapi-proxy/call/web`:**
    - Checks `Origin` and the workspace cookie, then **atomically reserves** the caps (§22). If a cap is reached → 429, and the UI offers the chat.
    - **Discards the client body** and calls `POST https://api.vapi.ai/call/web` with the **server-only public key** (`VAPI_PUBLIC_KEY`; `/call/web` answers the private key with 401 "Invalid Key", checked 2026-10-21): `{ assistantId, assistantOverrides: { variableValues: { channel: "web", first_name, email } } }`.
@@ -850,7 +851,7 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
 - **Tool calls:**
   - always **HTTP 200**: `{ results: [{ toolCallId, name, result | error }] }`
   - one result per `toolCallId`
-- **Routing** uses the server-side binding (`calls.vapi_call_id`) and the call `type` (web or phone, **VERIFY** the enum). A web call is **never** routed to `main`.
+- **Routing** uses the server-side binding (`calls.vapi_call_id`) and the call `type` (`webCall` verified in the spike; phone types per Vapi's enum: `inboundPhoneCall`, `outboundPhoneCall`). A web call is **never** routed to `main`.
 - **`status-update`:**
   - store the status and `monitor.controlUrl`
   - an `in-progress` call **we didn't create** → `end-call` through its controlUrl

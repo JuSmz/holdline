@@ -1,0 +1,40 @@
+{
+  "id": "01a1605c-74d8-7997-9d09-728de48d8c61",
+  "cost": 0,
+  "type": "webCall",
+  "orgId": "org-redacted",
+  "status": "queued",
+  "monitor": {
+    "controlUrl": "[redacted]"
+  },
+  "createdAt": "2026-10-21T21:27:14.392Z",
+  "transport": {
+    "callUrl": "[redacted]",
+    "provider": "daily",
+    "conversationType": "voice",
+    "assistantVideoEnabled": false,
+    "videoRecordingEnabled": false,
+    "roomDeleteOnUserLeaveEnabled": true
+  },
+  "updatedAt": "2026-10-21T21:27:14.392Z",
+  "webCallUrl": "[redacted]",
+  "assistantId": "2469ef6d-f020-44a9-8802-ff53885e5e5b",
+  "artifactPlan": {
+    "pcapEnabled": false,
+    "recordingEnabled": false,
+    "videoRecordingEnabled": false
+  },
+  "assistantVersion": "v2",
+  "assistantOverrides": {
+    "variableValues": {
+      "email": "lab-caller@example.com",
+      "channel": "web",
+      "first_name": "Lab"
+    }
+  },
+  "subscriptionLimits": {
+    "concurrencyLimit": 4,
+    "concurrencyBlocked": false,
+    "remainingConcurrentCalls": 3
+  }
+}
