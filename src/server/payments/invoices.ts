@@ -1,9 +1,10 @@
-import { and, eq, max } from "drizzle-orm";
+import { and, eq, gt, inArray, max } from "drizzle-orm";
 
 import { addonItems, authorizations, captures, customers, invoices } from "@/db/schema";
 import { readVar } from "@/server/config/env";
 import { type AddonPick, extraWorkLines } from "@/server/domain/pricing";
-import { lockBooking, setPaymentIssue, transitionBooking } from "@/server/domain/transition";
+import { lockBooking, logBookingEvent, setPaymentIssue, transitionBooking } from "@/server/domain/transition";
+import type { Executor } from "@/db/types";
 import { alreadyDoneOutcome, PayPalApiError } from "@/server/paypal/errors";
 import {
   cancelInvoice,
@@ -13,17 +14,26 @@ import {
   makeInvoiceNumber,
   sendInvoice,
 } from "@/server/paypal/invoicing";
+import { getOrder } from "@/server/paypal/orders";
 import { getAuthorization as getPayPalAuthorization, voidAuthorization } from "@/server/paypal/payments";
 import { payPalToCents } from "@/server/money";
 
 import { type PaymentContext, PaymentStateError } from "./context";
-import { hasOperationInFlight, OperationInProgressError, runOperation } from "./ledger";
+import {
+  DefiniteOperationError,
+  hasOperationInFlight,
+  OperationFailedError,
+  OperationInProgressError,
+  resumableKey,
+  runOperation,
+} from "./ledger";
 import { createPayoutRow, maybePaidOut } from "./payouts";
 import { activeAuthorization, assertLive, chainRoot, getBooking, getWorkspace } from "./queries";
 
 export type InvoiceRow = typeof invoices.$inferSelect;
 
 const DAY = 24 * 3_600_000;
+const DOUBLE_CLICK_MS = 2 * 60_000;
 const BILLABLE = new Set(["completed", "captured", "paid_out"]);
 
 /**
@@ -41,18 +51,41 @@ export async function billExtraWork(ctx: PaymentContext, bookingId: string, pick
   const addons = await db.select().from(addonItems).where(eq(addonItems.workspaceId, b.workspaceId));
   const { lines, totalCents } = extraWorkLines(addons, picks);
 
-  // A double click computes the same sequence number and lands on the same row and ledger key.
-  const [{ value: last }] = await db
-    .select({ value: max(invoices.seq) })
-    .from(invoices)
-    .where(and(eq(invoices.bookingId, bookingId), eq(invoices.kind, "extra_work")));
-  const seq = (last ?? 0) + 1;
-  const invoiceNumber = makeInvoiceNumber(paypal.instanceId, b.ref, seq, "X");
-  await db
-    .insert(invoices)
-    .values({ bookingId, invoiceNumber, seq, kind: "extra_work", items: lines, totalCents })
-    .onConflictDoNothing();
-  return issueInvoice(ctx, b.id, invoiceNumber, `invoice:${bookingId}:${seq}`, "Extra work after your Holdline visit.");
+  // Under the booking lock: a double click with the same items within two minutes gets the same invoice.
+  const invoiceNumber = await db.transaction(async (tx) => {
+    await lockBooking(tx, bookingId);
+    const recent = await tx
+      .select()
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.bookingId, bookingId),
+          eq(invoices.kind, "extra_work"),
+          inArray(invoices.status, ["draft", "sent"]),
+          gt(invoices.createdAt, new Date(ctx.now().getTime() - DOUBLE_CLICK_MS)),
+        ),
+      );
+    const same = recent.find((r) => JSON.stringify(r.items) === JSON.stringify(lines));
+    if (same) return same.invoiceNumber;
+    const [{ value: last }] = await tx
+      .select({ value: max(invoices.seq) })
+      .from(invoices)
+      .where(and(eq(invoices.bookingId, bookingId), eq(invoices.kind, "extra_work")));
+    const seq = (last ?? 0) + 1;
+    const number = makeInvoiceNumber(paypal.instanceId, b.ref, seq, "X");
+    await tx
+      .insert(invoices)
+      .values({ bookingId, invoiceNumber: number, seq, kind: "extra_work", items: lines, totalCents });
+    return number;
+  });
+  const [row] = await db.select().from(invoices).where(eq(invoices.invoiceNumber, invoiceNumber));
+  return issueInvoice(
+    ctx,
+    b.id,
+    invoiceNumber,
+    `invoice:${bookingId}:${row.seq}`,
+    "Extra work after your Holdline visit.",
+  );
 }
 
 /**
@@ -61,69 +94,104 @@ export async function billExtraWork(ctx: PaymentContext, bookingId: string, pick
  */
 export async function billViaInvoice(ctx: PaymentContext, bookingId: string): Promise<InvoiceRow> {
   const { db, paypal } = ctx;
-  const b = await getBooking(db, bookingId);
-  assertLive(b);
-  if (b.paymentIssue !== "capture_failed")
-    throw new PaymentStateError("Only a failed capture can be billed by invoice.");
-  if (await hasOperationInFlight(db, bookingId, "capture:")) {
-    throw new PaymentStateError("A capture is still in progress.", 409, "in_progress");
-  }
-  const amountCents = await fallbackAmount(ctx, b);
-  const name =
-    b.status === "completed" || b.status === "captured" ? `${b.serviceName} (${b.ref})` : `No-show fee (${b.ref})`;
-  const invoiceNumber = makeInvoiceNumber(paypal.instanceId, b.ref, 1, "F");
-  await db
-    .insert(invoices)
-    .values({
+  // Checks and the claim (the fallback row) under the booking lock: Retry capture takes the same lock
+  // and refuses once a fallback row exists; we refuse while any capture is in flight or has taken money.
+  const { booking: b, invoiceNumber } = await db.transaction(async (tx) => {
+    const locked = await lockBooking(tx, bookingId);
+    assertLive(locked);
+    const number = makeInvoiceNumber(paypal.instanceId, locked.ref, 1, "F");
+    const [existing] = await tx.select().from(invoices).where(eq(invoices.invoiceNumber, number));
+    if (existing && existing.status !== "cancelled") return { booking: locked, invoiceNumber: number };
+    if (locked.paymentIssue !== "capture_failed") {
+      throw new PaymentStateError("Only a failed capture can be billed by invoice.");
+    }
+    if (await hasOperationInFlight(tx, bookingId, "capture:")) {
+      throw new PaymentStateError("A capture is still in progress.", 409, "in_progress");
+    }
+    const [taken] = await tx
+      .select({ id: captures.id })
+      .from(captures)
+      .where(and(eq(captures.bookingId, bookingId), inArray(captures.status, ["COMPLETED", "PENDING"])));
+    if (taken && locked.status !== "captured") {
+      throw new PaymentStateError("A capture already took this money.", 409, "already_captured");
+    }
+    if (existing) throw new PaymentStateError("The fallback invoice was cancelled.", 409, "invoice_cancelled");
+    const amountCents = await fallbackAmount(tx, locked);
+    const name =
+      locked.status === "completed" || locked.status === "captured"
+        ? `${locked.serviceName} (${locked.ref})`
+        : `No-show fee (${locked.ref})`;
+    await tx.insert(invoices).values({
       bookingId,
-      invoiceNumber,
+      invoiceNumber: number,
       seq: 0,
       kind: "fallback",
       items: [{ key: null, name, quantity: 1, unitAmountCents: amountCents }],
       totalCents: amountCents,
-    })
-    .onConflictDoNothing();
+    });
+    return { booking: locked, invoiceNumber: number };
+  });
 
-  // Release any live hold before asking for the money again (never charge twice).
+  // Release any live hold before asking for the money again — and never invoice money PayPal already has.
   const auth = await activeAuthorization(db, b);
   const root = await chainRoot(db, auth);
-  const voidRequestId = paypal.requestId("void", bookingId, "fallback");
-  await runOperation(db, {
-    key: `void:${bookingId}:fallback`,
+  const voidKey = await resumableKey(db, `void:${bookingId}:fallback`);
+  const voidRequestId = paypal.requestId("void", bookingId, "fallback", ...(voidKey.n ? [`r${voidKey.n}`] : []));
+  const { result: released } = await runOperation(db, {
+    key: voidKey.key,
     kind: "void",
     bookingId,
     requestId: voidRequestId,
     now: ctx.now,
     run: async () => {
       const current = await getPayPalAuthorization(paypal, auth.paypalAuthorizationId);
+      if (current.status === "CAPTURED" || current.status === "PARTIALLY_CAPTURED") {
+        const order = auth.paypalOrderId ?? root.paypalOrderId;
+        const remote = order ? await getOrder(paypal, order) : null;
+        const live = remote?.purchase_units?.[0]?.payments?.captures?.some(
+          (c) => c.status === "COMPLETED" || c.status === "PENDING",
+        );
+        if (live || !remote) throw new DefiniteOperationError("PayPal already captured money on this hold");
+      }
+      let voided = false;
       if (current.status === "CREATED" || current.status === "PARTIALLY_CAPTURED") {
         try {
           await voidAuthorization(paypal, root.paypalAuthorizationId, { requestId: voidRequestId });
+          voided = true;
         } catch (error) {
-          const fine =
-            alreadyDoneOutcome("void", error) === "voided" ||
-            (error instanceof PayPalApiError && /EXPIRED/.test(error.issue ?? ""));
-          if (!fine) throw error;
+          const done = alreadyDoneOutcome("void", error) === "voided";
+          const expired = error instanceof PayPalApiError && /EXPIRED/.test(error.issue ?? "");
+          if (!done && !expired) throw error;
+          voided = true;
         }
       }
-      return { status: current.status };
+      return { status: current.status, voided };
     },
+  }).catch(async (error: unknown) => {
+    if (error instanceof DefiniteOperationError || error instanceof OperationFailedError) {
+      // Nothing was sent: drop the draft so Retry capture or a later decision stays possible.
+      await db
+        .update(invoices)
+        .set({ status: "cancelled", updatedAt: ctx.now() })
+        .where(and(eq(invoices.invoiceNumber, invoiceNumber), eq(invoices.status, "draft")));
+    }
+    throw error;
   });
-  await db.update(authorizations).set({ status: "VOIDED", updatedAt: ctx.now() }).where(eq(authorizations.id, root.id));
-  return issueInvoice(
-    ctx,
-    bookingId,
-    invoiceNumber,
-    `fallback-invoice:${bookingId}`,
-    "Payment for your Holdline visit.",
-  );
+  if (released.voided || released.status === "VOIDED") {
+    await db
+      .update(authorizations)
+      .set({ status: "VOIDED", updatedAt: ctx.now() })
+      .where(eq(authorizations.id, root.id));
+  }
+  const issueKey = await resumableKey(db, `fallback-invoice:${bookingId}`);
+  return issueInvoice(ctx, bookingId, invoiceNumber, issueKey.key, "Payment for your Holdline visit.");
 }
 
-async function fallbackAmount(ctx: PaymentContext, b: Awaited<ReturnType<typeof getBooking>>): Promise<number> {
+async function fallbackAmount(db: Executor, b: Awaited<ReturnType<typeof getBooking>>): Promise<number> {
   if (b.status === "completed") return b.priceCents;
   if (b.status === "no_show" || b.status === "cancelled") return b.noShowFeeCents;
   // captured with a PENDING capture that was later declined: bill what that capture asked for.
-  const [declined] = await ctx.db.select().from(captures).where(eq(captures.bookingId, b.id));
+  const [declined] = await db.select().from(captures).where(eq(captures.bookingId, b.id));
   return declined?.amountCents ?? b.priceCents;
 }
 
@@ -216,6 +284,17 @@ export async function syncInvoice(ctx: PaymentContext, invoiceId: string): Promi
       .where(and(eq(invoices.id, row.id), eq(invoices.status, "sent")))
       .returning();
     if (!paid) return; // another path got here first
+    if (row.kind === "fallback" && (b.status === "voided" || b.status === "expired")) {
+      // The hold was released (e.g. the fee was waived) but the invoice got paid anyway: no payout, refund by hand.
+      await logBookingEvent(tx, {
+        bookingId: b.id,
+        actor: "webhook",
+        flag: "fallback_paid_after_release",
+        reason: "refund_needed",
+      });
+      console.error(`[holdline] ALERT fallback invoice ${row.invoiceNumber} paid after release; refund needed`);
+      return;
+    }
     if (row.kind === "fallback") {
       if (b.status === "completed" || b.status === "no_show" || b.status === "cancelled") {
         await transitionBooking(tx, {

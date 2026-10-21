@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 
-import { authorizations, captures } from "@/db/schema";
+import { authorizations, captures, invoices } from "@/db/schema";
 import { conflictMessage } from "@/server/domain/booking-state";
 import { isLateCancellation, policyOf } from "@/server/domain/policy";
 import { type Actor, lockBooking, transitionBooking } from "@/server/domain/transition";
@@ -9,7 +9,13 @@ import { voidAuthorization } from "@/server/paypal/payments";
 
 import { captureBooking, type MoneyOutcome } from "./capture";
 import { type PaymentContext, PaymentStateError } from "./context";
-import { DefiniteOperationError, hasOperationInFlight, OperationInProgressError, runOperation } from "./ledger";
+import {
+  DefiniteOperationError,
+  hasOperationInFlight,
+  OperationInProgressError,
+  resumableKey,
+  runOperation,
+} from "./ledger";
 import { activeAuthorization, assertLive, chainRoot, getBooking, getWorkspace } from "./queries";
 
 /**
@@ -30,11 +36,13 @@ export async function voidHold(
   if (b.status !== from) throw new PaymentStateError(`Can't release the hold from ${b.status}.`);
   const auth = await activeAuthorization(db, b);
   const root = await chainRoot(db, auth);
-  const requestId = paypal.requestId("void", bookingId);
+  // After a definite failure an owner re-click (Cancel, Waive) retries under a new key.
+  const attempt = await resumableKey(db, `void:${bookingId}`);
+  const requestId = paypal.requestId("void", bookingId, ...(attempt.n ? [`r${attempt.n}`] : []));
 
   try {
     await runOperation(db, {
-      key: `void:${bookingId}`,
+      key: attempt.key,
       kind: "void",
       bookingId,
       requestId,
@@ -80,6 +88,19 @@ export async function waiveFee(ctx: PaymentContext, bookingId: string): Promise<
   if (await hasOperationInFlight(db, bookingId, "capture:")) {
     throw new PaymentStateError("A fee capture is still in progress.", 409, "in_progress");
   }
+  const [openInvoice] = await db
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.bookingId, bookingId),
+        eq(invoices.kind, "fallback"),
+        inArray(invoices.status, ["draft", "sent"]),
+      ),
+    );
+  if (openInvoice) {
+    throw new PaymentStateError("A fallback invoice is open; cancel it before waiving the fee.", 409, "invoice_open");
+  }
   const [captured] = await db
     .select({ id: captures.id })
     .from(captures)
@@ -124,8 +145,25 @@ export async function cancelBooking(
     return { status: "voided", booking, rule: "withdrawn", amountCents: 0 };
   }
 
-  const late = b.status === "cancelled" ? b.cancelReason === "late" : isLateCancellation(policy, b.slotStart, now);
+  const decided = b.status !== "authorized";
+  const late = decided ? b.cancelReason === "late" : isLateCancellation(policy, b.slotStart, now);
   const fee = late ? b.noShowFeeCents : 0;
+  if (decided && b.status !== "cancelled") {
+    // An exact repeat of a finished cancel returns its result (§8.4.2); anything else is a sibling (409).
+    const { changed } = await db.transaction((tx) =>
+      transitionBooking(tx, { bookingId, from: "authorized", to: "cancelled", actor, reason: "repeat" }),
+    );
+    if (!changed && (b.status === "voided" || b.status === "captured" || b.status === "paid_out")) {
+      const rule = b.cancelReason === "late" ? ("late_fee" as const) : ("free_void" as const);
+      return {
+        status: b.status === "voided" ? "voided" : "captured",
+        booking: b,
+        rule,
+        amountCents: rule === "late_fee" ? b.noShowFeeCents : 0,
+      };
+    }
+    throw new PaymentStateError(conflictMessage(b.status));
+  }
   if (b.status === "authorized") {
     await db.transaction((tx) =>
       transitionBooking(tx, {
@@ -137,8 +175,6 @@ export async function cancelBooking(
         patch: { cancelReason: late ? "late" : "owner" },
       }),
     );
-  } else if (b.status !== "cancelled") {
-    throw new PaymentStateError(conflictMessage(b.status));
   }
 
   if (fee > 0) {

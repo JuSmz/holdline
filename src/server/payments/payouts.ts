@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
-import { bookings, captures, invoices, payouts, technicians } from "@/db/schema";
+import { bookings, captures, invoices, paymentOperations, payouts, technicians } from "@/db/schema";
 import type { Executor, Tx } from "@/db/types";
 import { payoutCents } from "@/server/domain/pricing";
 import { lockBooking, setPaymentIssue, transitionBooking } from "@/server/domain/transition";
@@ -16,7 +16,7 @@ import {
 } from "@/server/paypal/payouts";
 
 import { type PaymentContext, PaymentStateError } from "./context";
-import { OperationInProgressError, runOperation } from "./ledger";
+import { isDefiniteFailure, OperationFailedError, OperationInProgressError, runOperation } from "./ledger";
 
 export type PayoutRow = typeof payouts.$inferSelect;
 
@@ -108,6 +108,9 @@ export async function sendPayout(ctx: PaymentContext, payoutId: string): Promise
       .where(and(eq(payouts.id, payoutId), eq(payouts.status, "pending")));
   } catch (error) {
     if (error instanceof OperationInProgressError) return getPayout(db, payoutId);
+    // Only a definite refusal of the create marks the row failed. Anything else (e.g. our DB write after
+    // PayPal accepted) leaves it pending: the next send replays the ledger result.
+    if (!(error instanceof OperationFailedError) && !isDefiniteFailure(error)) throw error;
     await db
       .update(payouts)
       .set({ status: "failed", transactionStatus: "CREATE_FAILED", updatedAt: ctx.now() })
@@ -138,9 +141,10 @@ export async function syncPayout(ctx: PaymentContext, payoutId: string): Promise
           : outcome === "needs_review"
             ? "needs_review"
             : "processing";
-  // Terminal rows never move again; a cancelling row only moves on to failed (RETURNED).
+  // Terminal rows never move again. A cancelling row follows PayPal (the recipient may still claim it,
+  // or it comes back RETURNED) but doesn't fall back to unclaimed while the cancel is open.
   const movable =
-    row.status === "processing" || row.status === "unclaimed" || (row.status === "cancelling" && next === "failed");
+    row.status === "processing" || row.status === "unclaimed" || (row.status === "cancelling" && next !== "unclaimed");
   if (movable && next !== row.status) {
     await db
       .update(payouts)
@@ -213,24 +217,21 @@ export async function retryPayout(ctx: PaymentContext, payoutId: string): Promis
   const { db, paypal } = ctx;
   let row = await getPayout(db, payoutId);
   if (row.sample) throw new PaymentStateError("Sample payouts are read-only.");
-  if (row.status === "unclaimed") {
-    if (!row.paypalItemId) throw new PaymentStateError("The payout item isn't known yet.");
-    await db.update(payouts).set({ status: "cancelling", updatedAt: ctx.now() }).where(eq(payouts.id, payoutId));
-    await runOperation(db, {
-      key: `payout-cancel:${payoutId}`,
-      kind: "payout-cancel",
-      bookingId: row.bookingId,
-      requestId: paypal.requestId("payout-cancel", row.paypalItemId),
-      now: ctx.now,
-      run: async () => {
-        const item = await cancelUnclaimedItem(paypal, row.paypalItemId!, {
-          requestId: paypal.requestId("payout-cancel", row.paypalItemId!),
-        });
-        return { status: item.transaction_status ?? null };
-      },
-    });
+  // A send whose result we never recorded: sync that batch instead of paying a second time.
+  const [sent] = await db
+    .select()
+    .from(paymentOperations)
+    .where(eq(paymentOperations.key, `payout:${payoutId}`));
+  if (sent?.state === "in_flight") throw new PaymentStateError("This payout is still being sent.", 409, "in_progress");
+  const sentBatch = (sent?.result as { payoutBatchId?: string } | null)?.payoutBatchId;
+  if (sent?.state === "succeeded" && sentBatch && !row.paypalBatchId) {
+    await db
+      .update(payouts)
+      .set({ paypalBatchId: sentBatch, status: "processing", updatedAt: ctx.now() })
+      .where(eq(payouts.id, payoutId));
     row = await syncPayout(ctx, payoutId);
   }
+  if (row.status === "unclaimed" || row.status === "cancelling") row = await cancelUnclaimed(ctx, row);
   if (row.status !== "failed") {
     throw new PaymentStateError("Only a failed or returned payout can be retried.", 409, "payout_not_failed");
   }
@@ -286,6 +287,38 @@ export async function retryPayout(ctx: PaymentContext, payoutId: string): Promis
   return sendPayout(ctx, next.id);
 }
 
+/**
+ * UNCLAIMED → cancel first (SPEC §9.9.4), then the item comes back RETURNED and the row is failed.
+ * An unknown cancel outcome leaves the row `cancelling`; the reconciler re-sends the same cancel.
+ */
+export async function cancelUnclaimed(ctx: PaymentContext, row: PayoutRow): Promise<PayoutRow> {
+  const { db, paypal } = ctx;
+  if (!row.paypalItemId) throw new PaymentStateError("The payout item isn't known yet.");
+  const itemId = row.paypalItemId;
+  const requestId = paypal.requestId("payout-cancel", itemId);
+  try {
+    await runOperation(db, {
+      key: `payout-cancel:${row.id}`,
+      kind: "payout-cancel",
+      bookingId: row.bookingId,
+      requestId,
+      now: ctx.now,
+      run: async () => {
+        const item = await cancelUnclaimedItem(paypal, itemId, { requestId });
+        return { status: item.transaction_status ?? null };
+      },
+    });
+  } catch (error) {
+    if (error instanceof OperationInProgressError) {
+      await db.update(payouts).set({ status: "cancelling", updatedAt: ctx.now() }).where(eq(payouts.id, row.id));
+      return getPayout(db, row.id);
+    }
+    // A definite refusal (e.g. the recipient claimed it meanwhile): just follow PayPal's state.
+    if (!(error instanceof OperationFailedError) && !isDefiniteFailure(error)) throw error;
+  }
+  return syncPayout(ctx, row.id);
+}
+
 async function recognisedFor(db: Executor, row: PayoutRow): Promise<number> {
   if (row.source === "capture") {
     const [c] = await db.select().from(captures).where(eq(captures.id, row.sourceId));
@@ -316,7 +349,7 @@ export async function processingPayoutIds(db: Executor, limit: number): Promise<
   const rows = await db
     .select({ id: payouts.id })
     .from(payouts)
-    .where(and(inArray(payouts.status, ["processing", "cancelling"]), eq(payouts.sample, false)))
+    .where(and(inArray(payouts.status, ["processing", "cancelling", "unclaimed"]), eq(payouts.sample, false)))
     .limit(limit);
   return rows.map((r) => r.id);
 }

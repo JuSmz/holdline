@@ -99,6 +99,8 @@ export const webhookEvents = pgTable(
     processedAt: timestamp("processed_at", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
     error: text("error"),
+    /** A short processing lease (stage 6): no transaction is held open while a handler runs. */
+    claimedUntil: timestamp("claimed_until", { withTimezone: true }),
   },
   (t) => [index("webhook_events_received_idx").on(t.receivedAt)],
 );
@@ -542,10 +544,18 @@ export const paymentOperations = pgTable(
     attempts: integer("attempts").notNull().default(1),
     lastError: text("last_error"),
     result: jsonb("result").$type<unknown>(),
+    /**
+     * Set once the reconciler has confirmed that a succeeded operation's result is reflected in the
+     * domain tables (or re-applied it). Covers a crash between PayPal's answer and our DB write.
+     */
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("payment_operations_inflight_idx").on(t.state, t.leaseUntil)],
+  (t) => [
+    index("payment_operations_inflight_idx").on(t.state, t.leaseUntil),
+    index("payment_operations_unapplied_idx").on(t.state, t.appliedAt),
+  ],
 );
 
 // ─── Notifications, email, rate limits ────────────────────────────────────────────────────────────

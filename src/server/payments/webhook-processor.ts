@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 
 import { authorizations, captures, invoices, paypalOrders, payouts, webhookEvents } from "@/db/schema";
 import { dbErrorCode } from "@/server/db-error";
@@ -14,49 +14,72 @@ import type { PaymentContext } from "./context";
 import { syncPayout } from "./payouts";
 import { getAuthorization } from "./queries";
 import { syncInvoice } from "./invoices";
+import { linkReauthorizedChild } from "./reauthorize";
 
 export type WebhookEventRow = typeof webhookEvents.$inferSelect;
+
+/** How long one worker may hold an event before another may take it over. */
+const CLAIM_MS = 60_000;
 
 /**
  * Processes one stored, verified event (SPEC §11.4): re-GET the resource — the payload is never trusted
  * for state — and map it onto the same CAS and ledger functions. Out-of-order delivery is harmless.
- * The event row is locked (SKIP LOCKED) for the duration, so concurrent duplicates are processed once.
+ * A short committed claim (`claimed_until`) makes concurrent duplicates run once without holding a
+ * transaction (and a pool connection) open while the handler works.
  * Returns false when another worker holds it or it was already processed.
  */
 export async function processWebhookEvent(ctx: PaymentContext, eventId: string): Promise<boolean> {
-  const outcome = await ctx.db.transaction(async (tx) => {
-    const [event] = await tx
-      .select()
-      .from(webhookEvents)
-      .where(eq(webhookEvents.id, eventId))
-      .for("update", { skipLocked: true });
-    if (!event || event.processedAt) return { done: false as const };
-    if (event.simulated) {
-      // Lab simulator events are never processed (PLAN stage 6).
-      await tx
-        .update(webhookEvents)
-        .set({ processedAt: ctx.now(), error: "simulated" })
-        .where(eq(webhookEvents.id, eventId));
-      return { done: true as const };
-    }
-    try {
-      await handle(ctx, event);
-    } catch (error) {
-      // Committed with the lock released; PayPal's retry or the reconciler drives it again.
-      await tx
-        .update(webhookEvents)
-        .set({ attempts: sql`${webhookEvents.attempts} + 1`, error: dbErrorCode(error).slice(0, 200) })
-        .where(eq(webhookEvents.id, eventId));
-      return { done: false as const, error };
-    }
-    await tx
+  const { db } = ctx;
+  const now = ctx.now();
+  const [event] = await db
+    .update(webhookEvents)
+    .set({ claimedUntil: new Date(now.getTime() + CLAIM_MS) })
+    .where(
+      and(
+        eq(webhookEvents.id, eventId),
+        isNull(webhookEvents.processedAt),
+        or(isNull(webhookEvents.claimedUntil), lt(webhookEvents.claimedUntil, now)),
+      ),
+    )
+    .returning();
+  if (!event) return false;
+  if (event.simulated) {
+    // Lab simulator events are never processed (PLAN stage 6).
+    await db
       .update(webhookEvents)
-      .set({ processedAt: ctx.now(), attempts: sql`${webhookEvents.attempts} + 1`, error: null })
+      .set({ processedAt: ctx.now(), error: "simulated", claimedUntil: null })
       .where(eq(webhookEvents.id, eventId));
-    return { done: true as const };
-  });
-  if ("error" in outcome) throw outcome.error;
-  return outcome.done;
+    return true;
+  }
+  try {
+    await handle(ctx, event);
+  } catch (error) {
+    // PayPal's retry or the reconciler drives it again.
+    await db
+      .update(webhookEvents)
+      .set({
+        attempts: sql`${webhookEvents.attempts} + 1`,
+        error: dbErrorCode(error).slice(0, 200),
+        claimedUntil: null,
+      })
+      .where(eq(webhookEvents.id, eventId));
+    throw error;
+  }
+  await db
+    .update(webhookEvents)
+    .set({ processedAt: ctx.now(), attempts: sql`${webhookEvents.attempts} + 1`, error: null, claimedUntil: null })
+    .where(eq(webhookEvents.id, eventId));
+  return true;
+}
+
+/** `/v2/payments/<kind>/<id>` from a resource's rel="up" link. */
+function upLinkId(
+  links: { href: string; rel: string }[] | undefined,
+  kind: "authorizations" | "captures",
+): string | null {
+  const up = links?.find((l) => l.rel === "up");
+  const match = up ? new RegExp(`/v2/payments/${kind}/([A-Za-z0-9-]+)$`).exec(up.href) : null;
+  return match?.[1] ?? null;
 }
 
 async function handle(ctx: PaymentContext, event: WebhookEventRow): Promise<void> {
@@ -78,6 +101,32 @@ async function handle(ctx: PaymentContext, event: WebhookEventRow): Promise<void
     const orderId = remote.supplementary_data?.related_ids?.order_id ?? stored?.paypalOrderId ?? null;
     const bookingId = stored?.bookingId ?? remote.custom_id ?? null;
     if (!bookingId) return;
+
+    // A reauthorization child: link it to its parent, never treat it as a new (or orphaned) hold.
+    const parentPaypalId = upLinkId(remote.links, "authorizations");
+    if (type === "PAYMENT.AUTHORIZATION.CREATED" && parentPaypalId) {
+      const [parent] = await db
+        .select()
+        .from(authorizations)
+        .where(eq(authorizations.paypalAuthorizationId, parentPaypalId));
+      if (parent && remote.status === "CREATED") {
+        await db.transaction((tx) =>
+          linkReauthorizedChild(tx, {
+            bookingId: parent.bookingId,
+            parent,
+            child: {
+              paypalAuthorizationId: remote.id,
+              status: remote.status,
+              amountCents: payPalToCents(remote.amount.value),
+              createTime: remote.create_time ?? null,
+              validUntil: remote.expiration_time ? new Date(remote.expiration_time) : parent.validUntil,
+            },
+            now: ctx.now(),
+          }),
+        );
+      }
+      return;
+    }
 
     if (type === "PAYMENT.AUTHORIZATION.CREATED" && orderId) {
       const [order] = await db.select().from(paypalOrders).where(eq(paypalOrders.paypalOrderId, orderId));
@@ -122,16 +171,20 @@ async function handle(ctx: PaymentContext, event: WebhookEventRow): Promise<void
   }
 
   if (type.startsWith("PAYMENT.CAPTURE.")) {
-    const remote = await getCapture(paypal, resourceId);
-    const [stored] = await db.select().from(captures).where(eq(captures.paypalCaptureId, resourceId));
-    if (!stored) return; // our in-flight capture's recovery records it
+    // REFUNDED/REVERSED carry a refund resource; its rel="up" link names the capture.
+    const raw = event.raw as { resource?: { links?: { href: string; rel: string }[] } };
+    const refunded = type === "PAYMENT.CAPTURE.REFUNDED" || type === "PAYMENT.CAPTURE.REVERSED";
+    const captureId = (refunded ? upLinkId(raw.resource?.links, "captures") : null) ?? resourceId;
+    const remote = await getCapture(paypal, captureId);
+    const [stored] = await db.select().from(captures).where(eq(captures.paypalCaptureId, captureId));
+    if (!stored) return; // the ledger reconciler records our capture from its stored result
     if (type === "PAYMENT.CAPTURE.REFUNDED" || type === "PAYMENT.CAPTURE.REVERSED") {
       await db.update(captures).set({ status: remote.status, updatedAt: ctx.now() }).where(eq(captures.id, stored.id));
       await logBookingEvent(db, {
         bookingId: stored.bookingId,
         actor: "webhook",
         flag: type.split(".").pop()!.toLowerCase(),
-        detail: { capture: resourceId },
+        detail: { capture: captureId, refund: resourceId },
       });
       return;
     }
@@ -146,6 +199,7 @@ async function handle(ctx: PaymentContext, event: WebhookEventRow): Promise<void
       status: remote.status,
       amountCents: payPalToCents(remote.amount.value),
       finalCapture: remote.final_capture ?? true,
+      authorizationId: auth.id,
     });
     return;
   }

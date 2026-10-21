@@ -10,6 +10,7 @@ import {
   invoices,
   outboxEmails,
   paymentOperations,
+  payouts,
   paypalOrders,
   vapiEvents,
   webhookEvents,
@@ -22,18 +23,24 @@ import { transitionBooking } from "@/server/domain/transition";
 import { payPalToCents } from "@/server/money";
 import { alreadyDoneOutcome, PayPalApiError } from "@/server/paypal/errors";
 import { getOrder } from "@/server/paypal/orders";
-import { getCapture, voidAuthorization } from "@/server/paypal/payments";
-import { getPayoutItem } from "@/server/paypal/payouts";
+import { getAuthorization as getPayPalAuthorization, getCapture, voidAuthorization } from "@/server/paypal/payments";
 
-import { authorizeBooking, createOrderForBooking, voidOrphan } from "./authorize";
-import { applyCapture, captureBooking, type CaptureKind } from "./capture";
+import { applyAuthorization, type AuthInfo, authorizeBooking, createOrderForBooking, voidOrphan } from "./authorize";
+import { applyCapture, captureBooking, type CaptureInfo, type CaptureKind } from "./capture";
 import { processCaptureStatus } from "./capture-status";
 import type { PaymentContext } from "./context";
 import { billViaInvoice, issueInvoice, syncInvoice } from "./invoices";
-import { DefiniteOperationError, hasOperationInFlight, type OperationRow, runOperation } from "./ledger";
-import { pendingPayoutIds, processingPayoutIds, sendPayout, syncPayout } from "./payouts";
+import {
+  DefiniteOperationError,
+  hasOperationInFlight,
+  markApplied,
+  type OperationRow,
+  runOperation,
+  unappliedOperations,
+} from "./ledger";
+import { cancelUnclaimed, pendingPayoutIds, processingPayoutIds, sendPayout, syncPayout } from "./payouts";
 import { getAuthorization, getBooking } from "./queries";
-import { reauthorizeBooking } from "./reauthorize";
+import { linkReauthorizedChild, reauthorizeBooking } from "./reauthorize";
 import { releaseStaleHold, voidHold } from "./void";
 import { processWebhookEvent, unprocessedEventIds } from "./webhook-processor";
 
@@ -66,7 +73,15 @@ export async function runTick(ctx: PaymentContext | null, db: Db, now: Date = ne
 
   if (ctx) {
     // 1. Reconcile
-    await each("reconcile_ops", await expiredOperations(db, now), (op) => resumeOperation(ctx, op));
+    await each("reconcile_ops", await expiredOperations(db, now), (op) =>
+      resumeOperation(ctx, op).finally(() => backOff(ctx, op)),
+    );
+    await each("reconcile_applied", await unappliedOperations(db, new Date(now.getTime() - 30_000), BATCH), (op) =>
+      reapplyOperation(ctx, op),
+    );
+    await each("reconcile_pending_auths", await pendingAuthorizationRows(db), (auth) =>
+      refreshAuthorization(ctx, auth),
+    );
     await each("reconcile_webhooks", await unprocessedEventIds(ctx, BATCH), (id) => processWebhookEvent(ctx, id));
     await each("reconcile_approved_orders", await openOrders(db, now), (o) =>
       chaseOrder(ctx, o.bookingId, o.paypalOrderId),
@@ -98,7 +113,33 @@ async function expiredOperations(db: Db, now: Date): Promise<OperationRow[]> {
     .select()
     .from(paymentOperations)
     .where(and(eq(paymentOperations.state, "in_flight"), lt(paymentOperations.leaseUntil, now)))
+    .orderBy(paymentOperations.updatedAt)
     .limit(BATCH);
+}
+
+/** Give up on a row nobody can settle after this many resume attempts (it is alerted, never silently lost). */
+const MAX_RESUMES = 30;
+
+/**
+ * After a resume: a row still in flight with an expired lease was not taken over (the domain state moved
+ * on, or PayPal was unreachable). Back it off so other rows get their turn; abandon it after MAX_RESUMES.
+ */
+async function backOff(ctx: PaymentContext, op: OperationRow) {
+  const [row] = await ctx.db.select().from(paymentOperations).where(eq(paymentOperations.key, op.key));
+  if (!row || row.state !== "in_flight" || row.leaseUntil > ctx.now()) return;
+  if (row.attempts >= MAX_RESUMES) {
+    await failOp(ctx, op.key, "abandoned after repeated recovery attempts");
+    console.error(`[holdline] ALERT ledger operation ${op.kind} for booking ${op.bookingId ?? "?"} abandoned`);
+    return;
+  }
+  await ctx.db
+    .update(paymentOperations)
+    .set({
+      attempts: sql`${paymentOperations.attempts} + 1`,
+      leaseUntil: new Date(ctx.now().getTime() + 5 * 60_000),
+      updatedAt: ctx.now(),
+    })
+    .where(and(eq(paymentOperations.key, op.key), eq(paymentOperations.state, "in_flight")));
 }
 
 /** Re-drives an in-flight ledger row whose lease expired: GET first, then the same request ID (§10.3.4). */
@@ -112,9 +153,12 @@ export async function resumeOperation(ctx: PaymentContext, op: OperationRow): Pr
     }
     case "order-create": {
       const b = await getBooking(ctx.db, parts[1]);
-      if (b.status === "pending_payment" && b.holdExpiresAt > ctx.now()) {
+      const reapproval =
+        b.status === "authorized" && (b.paymentIssue === "reauth_failed" || b.paymentIssue === "hold_lost");
+      if ((b.status === "pending_payment" && b.holdExpiresAt > ctx.now()) || reapproval) {
         await createOrderForBooking(ctx, b.id);
       } else {
+        // An order for a booking nobody can pay any more holds no money: stop chasing it.
         await failOp(ctx, op.key, "booking no longer payable");
       }
       return;
@@ -126,7 +170,7 @@ export async function resumeOperation(ctx: PaymentContext, op: OperationRow): Pr
       return;
     }
     case "void": {
-      if (op.key.endsWith(":fallback")) {
+      if (op.key.includes(":fallback")) {
         await billViaInvoice(ctx, parts[1]);
         return;
       }
@@ -167,18 +211,8 @@ export async function resumeOperation(ctx: PaymentContext, op: OperationRow): Pr
       await sendPayout(ctx, parts[1]);
       return;
     case "payout-cancel": {
-      const [payout] = await ctx.db.execute<{ paypal_item_id: string | null }>(
-        sql`select paypal_item_id from payouts where id = ${parts[1]}`,
-      );
-      if (!payout?.paypal_item_id) return;
-      const item = await getPayoutItem(ctx.paypal, payout.paypal_item_id);
-      if (item.transaction_status !== "UNCLAIMED") {
-        await ctx.db
-          .update(paymentOperations)
-          .set({ state: "succeeded", result: { status: item.transaction_status ?? null }, updatedAt: ctx.now() })
-          .where(eq(paymentOperations.key, op.key));
-        await syncPayout(ctx, parts[1]);
-      }
+      const [row] = await ctx.db.select().from(payouts).where(eq(payouts.id, parts[1]));
+      if (row) await cancelUnclaimed(ctx, row);
       return;
     }
     case "invoice": {
@@ -232,7 +266,11 @@ async function openOrders(db: Db, now: Date) {
     .innerJoin(bookings, eq(bookings.id, paypalOrders.bookingId))
     .where(
       and(
-        eq(bookings.status, "pending_payment"),
+        // Pending bookings, and re-approvals of authorized ones (SPEC §9.8).
+        or(
+          eq(bookings.status, "pending_payment"),
+          and(eq(bookings.status, "authorized"), inArray(bookings.paymentIssue, ["reauth_failed", "hold_lost"])),
+        ),
         eq(bookings.sample, false),
         inArray(paypalOrders.status, ["PAYER_ACTION_REQUIRED", "CREATED", "APPROVED"]),
         gt(paypalOrders.createdAt, new Date(now.getTime() - ORDER_CHASE_MS)),
@@ -299,6 +337,7 @@ export async function refreshCapture(ctx: PaymentContext, captureId: string) {
     status: remote.status,
     amountCents: payPalToCents(remote.amount.value),
     finalCapture: remote.final_capture ?? true,
+    authorizationId: auth.id,
   });
 }
 
@@ -440,4 +479,159 @@ export async function purgeExpiredPii(db: Db, now: Date): Promise<void> {
     .update(emailIdentities)
     .set({ email: null })
     .where(and(lt(emailIdentities.createdAt, cutoff), isNotNull(emailIdentities.email)));
+}
+
+// ── Ledger results not yet reflected in the domain tables ─────────────────────────────────────────
+
+/**
+ * Re-applies a succeeded operation from its stored result when the domain write never happened (a crash
+ * or DB error right after PayPal answered), then marks it applied. Every apply step is idempotent.
+ */
+export async function reapplyOperation(ctx: PaymentContext, op: OperationRow): Promise<void> {
+  const { db } = ctx;
+  const parts = op.key.split(":");
+  switch (op.kind) {
+    case "order-create": {
+      const result = op.result as { orderId?: string } | null;
+      const b = await getBooking(db, parts[1]);
+      if (result?.orderId) {
+        await db
+          .insert(paypalOrders)
+          .values({
+            bookingId: b.id,
+            paypalOrderId: result.orderId,
+            attempt: Number(parts[2]),
+            status: "PAYER_ACTION_REQUIRED",
+            amountCents: b.priceCents,
+          })
+          .onConflictDoNothing();
+      }
+      break;
+    }
+    case "authorize": {
+      const info = op.result as AuthInfo | null;
+      if (!info) break;
+      const [stored] = await db
+        .select()
+        .from(authorizations)
+        .where(eq(authorizations.paypalAuthorizationId, info.paypalAuthorizationId));
+      const [order] = await db.select().from(paypalOrders).where(eq(paypalOrders.paypalOrderId, parts[1]));
+      if (!stored && order) await applyAuthorization(ctx, order.bookingId, order.paypalOrderId, info, "system");
+      break;
+    }
+    case "capture": {
+      const info = op.result as CaptureInfo | null;
+      if (!info || !op.bookingId) break;
+      const [stored] = await db.select().from(captures).where(eq(captures.paypalCaptureId, info.paypalCaptureId));
+      if (!stored) {
+        const b = await getBooking(db, op.bookingId);
+        const authId = info.authorizationId ?? b.activeAuthorizationId;
+        if (authId)
+          await applyCapture(ctx, op.bookingId, parts[1] as CaptureKind, await getAuthorization(db, authId), info);
+      }
+      break;
+    }
+    case "void": {
+      if (op.key.includes(":fallback") || !op.bookingId) break;
+      const b = await getBooking(db, op.bookingId);
+      if (b.status === "cancelled" || b.status === "no_show") await voidHold(ctx, b.id, b.status, "recovered");
+      break;
+    }
+    case "void-orphan":
+    case "void-replaced": {
+      await db
+        .update(authorizations)
+        .set({ status: "VOIDED", updatedAt: ctx.now() })
+        .where(eq(authorizations.paypalAuthorizationId, parts[1]));
+      break;
+    }
+    case "reauth": {
+      const child = op.result as {
+        paypalAuthorizationId: string;
+        status: string;
+        amountCents: number;
+        createTime: string | null;
+        expirationTime: string | null;
+      } | null;
+      const [parent] = await db.select().from(authorizations).where(eq(authorizations.paypalAuthorizationId, parts[1]));
+      if (child && parent && child.status === "CREATED") {
+        await db.transaction((tx) =>
+          linkReauthorizedChild(tx, {
+            bookingId: parent.bookingId,
+            parent,
+            child: { ...child, validUntil: child.expirationTime ? new Date(child.expirationTime) : parent.validUntil },
+            now: ctx.now(),
+          }),
+        );
+      }
+      break;
+    }
+    case "payout": {
+      const result = op.result as { payoutBatchId?: string } | null;
+      const [row] = await db.select().from(payouts).where(eq(payouts.id, parts[1]));
+      if (row && result?.payoutBatchId && !row.paypalBatchId) {
+        await db
+          .update(payouts)
+          .set({ paypalBatchId: result.payoutBatchId, status: "processing", updatedAt: ctx.now() })
+          .where(and(eq(payouts.id, row.id), eq(payouts.status, "pending")));
+        await syncPayout(ctx, row.id);
+      }
+      break;
+    }
+    case "payout-cancel":
+      await syncPayout(ctx, parts[1]);
+      break;
+    case "invoice": {
+      const result = op.result as { paypalInvoiceId?: string; payerViewUrl?: string | null } | null;
+      const fallback = op.key.startsWith("fallback-invoice:");
+      const [row] = await db
+        .select()
+        .from(invoices)
+        .where(and(eq(invoices.bookingId, parts[1]), eq(invoices.seq, fallback ? 0 : Number(parts[2]))));
+      if (row && result?.paypalInvoiceId && row.status === "draft") {
+        await db
+          .update(invoices)
+          .set({
+            paypalInvoiceId: result.paypalInvoiceId,
+            payerViewUrl: result.payerViewUrl ?? null,
+            status: "sent",
+            updatedAt: ctx.now(),
+          })
+          .where(and(eq(invoices.id, row.id), eq(invoices.status, "draft")));
+      }
+      break;
+    }
+  }
+  await markApplied(db, op.key, ctx.now());
+}
+
+// ── PENDING authorizations (the webhook may never come) ──────────────────────────────────────────
+
+async function pendingAuthorizationRows(db: Db) {
+  const rows = await db
+    .select({ auth: authorizations })
+    .from(authorizations)
+    .innerJoin(bookings, eq(bookings.id, authorizations.bookingId))
+    .where(and(eq(authorizations.status, "PENDING"), eq(bookings.sample, false)))
+    .limit(BATCH);
+  return rows.map((r) => r.auth);
+}
+
+/** GETs a PENDING authorization; once it settles, apply it (authorize, decline, or void as an orphan). */
+async function refreshAuthorization(ctx: PaymentContext, auth: typeof authorizations.$inferSelect) {
+  const remote = await getPayPalAuthorization(ctx.paypal, auth.paypalAuthorizationId);
+  if (remote.status === "PENDING" || !auth.paypalOrderId) return;
+  await applyAuthorization(
+    ctx,
+    auth.bookingId,
+    auth.paypalOrderId,
+    {
+      paypalAuthorizationId: remote.id,
+      status: remote.status,
+      amountCents: payPalToCents(remote.amount.value),
+      createTime: remote.create_time ?? null,
+      expirationTime: remote.expiration_time ?? null,
+    },
+    "system",
+  );
 }

@@ -65,7 +65,9 @@ export class RawJson {
 
 type Token = { value: string; expiresAt: number };
 
-const isRetryableApiError = (error: PayPalApiError) => error.status >= 500 || isInProgress(error);
+// 429 RATE_LIMIT_REACHED is retried with backoff and the same request ID, like a 5xx.
+const isRetryableApiError = (error: PayPalApiError) =>
+  error.status >= 500 || error.status === 429 || isInProgress(error);
 
 /**
  * Thin PayPal REST client.

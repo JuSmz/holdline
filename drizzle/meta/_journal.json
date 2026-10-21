@@ -43,6 +43,13 @@
       "when": 1792621074609,
       "tag": "0005_workspace_cascade",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792623159633,
+      "tag": "0006_recovery_columns",
+      "breakpoints": true
     }
   ]
 }

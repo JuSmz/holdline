@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
 import { authorizations, captures, invoices } from "@/db/schema";
 import type { BookingStatus } from "@/server/domain/booking-state";
@@ -14,7 +14,9 @@ import {
 
 import { type PaymentContext, PaymentStateError } from "./context";
 import {
+  claimOperation,
   hasOperationInFlight,
+  isDefiniteFailure,
   markOperationFailed,
   nextRetryKey,
   OperationFailedError,
@@ -39,7 +41,15 @@ export type MoneyOutcome = {
   booking: Booking;
 };
 
-type CaptureInfo = { paypalCaptureId: string; status: string; amountCents: number; finalCapture: boolean };
+/** What a capture operation stores as its ledger result; enough to re-apply it after a crash. */
+export type CaptureInfo = {
+  paypalCaptureId: string;
+  status: string;
+  amountCents: number;
+  finalCapture: boolean;
+  /** Our authorizations.id the capture was made on. */
+  authorizationId: string;
+};
 
 /** Job done → full capture (SPEC §9.3). Allowed any time; a repeat resumes the capture. */
 export async function markJobDone(
@@ -68,25 +78,44 @@ export async function markNoShow(
   return captureBooking(ctx, bookingId, "no_show_fee");
 }
 
-/** Retry capture after `capture_failed` (SPEC §8.3): a new ledger key; disabled once a fallback invoice exists. */
+/**
+ * Retry capture after `capture_failed` (SPEC §8.3): a new ledger key; disabled once a fallback invoice
+ * exists. The checks and the claim run under the booking lock, so a concurrent Bill via invoice can't
+ * slip in between (it takes the same lock and refuses while a capture is in flight).
+ */
 export async function retryCapture(ctx: PaymentContext, bookingId: string): Promise<MoneyOutcome> {
-  const { db } = ctx;
-  const b = await getBooking(db, bookingId);
-  assertLive(b);
-  if (b.paymentIssue !== "capture_failed") throw new PaymentStateError("There is no failed capture to retry.");
-  const kind = (Object.keys(SOURCE) as CaptureKind[]).find((k) => SOURCE[k] === b.status);
-  if (!kind) throw new PaymentStateError("This capture can't be retried; bill via invoice instead.");
-  const [fallback] = await db
-    .select({ id: invoices.id })
-    .from(invoices)
-    .where(and(eq(invoices.bookingId, bookingId), eq(invoices.kind, "fallback")));
-  if (fallback)
-    throw new PaymentStateError("A fallback invoice exists; Retry capture is disabled.", 409, "invoice_exists");
-  if (await hasOperationInFlight(db, bookingId, `capture:`)) {
-    throw new PaymentStateError("A capture is still in progress.", 409, "in_progress");
-  }
-  return captureBooking(ctx, bookingId, kind, { retry: true });
+  const { db, paypal } = ctx;
+  const { kind, n } = await db.transaction(async (tx) => {
+    const b = await lockBooking(tx, bookingId);
+    assertLive(b);
+    if (b.paymentIssue !== "capture_failed") throw new PaymentStateError("There is no failed capture to retry.");
+    const k = (Object.keys(SOURCE) as CaptureKind[]).find((key) => SOURCE[key] === b.status);
+    if (!k) throw new PaymentStateError("This capture can't be retried; bill via invoice instead.");
+    const [fallback] = await tx
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(and(eq(invoices.bookingId, bookingId), eq(invoices.kind, "fallback"), ne(invoices.status, "cancelled")));
+    if (fallback) {
+      throw new PaymentStateError("A fallback invoice exists; Retry capture is disabled.", 409, "invoice_exists");
+    }
+    if (await hasOperationInFlight(tx, bookingId, "capture:")) {
+      throw new PaymentStateError("A capture is still in progress.", 409, "in_progress");
+    }
+    const retry = await nextRetryKey(tx, `capture:${k}:${bookingId}`);
+    await claimOperation(tx, {
+      key: retry.key,
+      kind: "capture",
+      bookingId,
+      requestId: captureRequestId(paypal, k, bookingId, retry.n),
+      now: ctx.now(),
+    });
+    return { kind: k, n: retry.n };
+  });
+  return captureBooking(ctx, bookingId, kind, { resumeRetry: n, preclaimed: true });
 }
+
+const captureRequestId = (paypal: PaymentContext["paypal"], kind: CaptureKind, bookingId: string, n: number) =>
+  paypal.requestId("capture", kind, bookingId, ...(n ? [`r${n}`] : []));
 
 /**
  * The capture itself (SPEC §9.3–9.5), under the ledger key `capture:<kind>:<bookingId>`.
@@ -97,8 +126,11 @@ export async function captureBooking(
   ctx: PaymentContext,
   bookingId: string,
   kind: CaptureKind,
-  /** retry: a new owner retry; resumeRetry: the reconciler resumes retry number n (SPEC §10.3.4). */
-  options: { retry?: boolean; resumeRetry?: number } = {},
+  /**
+   * resumeRetry: run (or resume) retry number n; preclaimed: retryCapture already claimed that key
+   * under the booking lock.
+   */
+  options: { resumeRetry?: number; preclaimed?: boolean } = {},
 ): Promise<MoneyOutcome> {
   const { db, paypal } = ctx;
   const b = await getBooking(db, bookingId);
@@ -112,13 +144,16 @@ export async function captureBooking(
   const base = `capture:${kind}:${bookingId}`;
   const retry = options.resumeRetry
     ? { key: `${base}:retry-${options.resumeRetry}`, n: options.resumeRetry }
-    : options.retry
-      ? await nextRetryKey(db, base)
-      : { key: base, n: 0 };
-  const requestId = paypal.requestId("capture", kind, bookingId, ...(retry.n ? [`r${retry.n}`] : []));
+    : { key: base, n: 0 };
+  const requestId = captureRequestId(paypal, kind, bookingId, retry.n);
   // Captures need a unique invoice_id per merchant: fees and retries get their own.
   const invoiceId = `${paypal.instanceId}-${b.ref}${kind === "full" ? "" : "-F"}${retry.n ? `-R${retry.n}` : ""}`;
   const find = () => findCapture(ctx, auth, invoiceId);
+  // A failed lookup after "already captured" must never count as a definite failure.
+  const lookUp = () =>
+    find().catch((error: unknown) => {
+      throw new Error(`capture lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
 
   let info: CaptureInfo;
   try {
@@ -128,6 +163,7 @@ export async function captureBooking(
       bookingId,
       requestId,
       now: ctx.now,
+      preclaimed: options.preclaimed,
       probe: find,
       run: async () => {
         try {
@@ -144,11 +180,13 @@ export async function captureBooking(
             status: capture.status,
             amountCents: payPalToCents(capture.amount.value),
             finalCapture: capture.final_capture ?? true,
+            authorizationId: auth.id,
           };
         } catch (error) {
           if (alreadyDoneOutcome("capture", error) === "captured") {
-            const existing = await find();
+            const existing = await lookUp();
             if (existing) return existing;
+            throw new Error("PayPal says captured, but the capture can't be found yet");
           }
           throw error;
         }
@@ -158,7 +196,7 @@ export async function captureBooking(
     if (error instanceof OperationInProgressError)
       return { status: "processing", booking: await getBooking(db, bookingId) };
     // Any definite refusal (declined, AUTHORIZATION_EXPIRED/VOIDED/DENIED, …): flag it, never roll back.
-    if (error instanceof OperationFailedError || isDefinite(error)) {
+    if (error instanceof OperationFailedError || isDefiniteFailure(error)) {
       const flagged = await ctx.db.transaction((tx) =>
         setPaymentIssue(tx, {
           bookingId,
@@ -176,11 +214,6 @@ export async function captureBooking(
   if (info.status === "DECLINED" || info.status === "FAILED")
     await markOperationFailed(db, retry.key, `capture ${info.status}`);
   return applyCapture(ctx, bookingId, kind, auth, info);
-}
-
-function isDefinite(error: unknown): boolean {
-  const e = error as { status?: number; phase?: string; name?: string };
-  return e?.name === "PayPalApiError" && e.phase === "api" && (e.status ?? 0) >= 400 && (e.status ?? 0) < 500;
 }
 
 /** Finds our capture on PayPal (GET order → payments.captures) by its invoice_id. */
@@ -202,6 +235,7 @@ async function findCapture(
     status: capture.status,
     amountCents: payPalToCents(capture.amount.value),
     finalCapture: capture.final_capture ?? true,
+    authorizationId: auth.id,
   };
 }
 

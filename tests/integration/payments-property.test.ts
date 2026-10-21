@@ -54,6 +54,9 @@ const ACTIONS = [
   "declineNextCapture",
   "pendingNextCapture",
   "failNextPayout",
+  "raceRetryVsInvoice",
+  "raceJobDoneVsNoShow",
+  "raceCancelVsTick",
 ] as const;
 type Action = (typeof ACTIONS)[number];
 
@@ -129,7 +132,19 @@ async function act(h: Harness, bookingId: string, workspaceId: string, action: A
       return void h.fake.next.captureStatus.push("PENDING");
     case "failNextPayout":
       return void h.fake.next.payoutItemStatus.push("FAILED");
+    case "raceRetryVsInvoice":
+      return race([retryCapture(h.ctx, bookingId), billViaInvoice(h.ctx, bookingId)]);
+    case "raceJobDoneVsNoShow":
+      return race([markJobDone(h.ctx, bookingId), markNoShow(h.ctx, bookingId)]);
+    case "raceCancelVsTick":
+      return race([cancelBooking(h.ctx, bookingId), runTick(h.ctx, db(), h.now())]);
   }
+}
+
+/** Concurrent owner actions: each may lose with an expected refusal; anything else fails the property. */
+async function race(actions: Promise<unknown>[]) {
+  const results = await Promise.allSettled(actions);
+  for (const r of results) if (r.status === "rejected" && !expected(r.reason)) throw r.reason;
 }
 
 /** SPEC §8.4.7, checked against PayPal's (the fake's) ground truth after every step. */
@@ -148,7 +163,26 @@ async function assertMoneyInvariant(h: Harness, bookingId: string) {
   const capturedCents = [...h.fake.captures.values()]
     .filter((c) => authIds.has(c.authorizationId) && (c.status === "COMPLETED" || c.status === "PENDING"))
     .reduce((sum, c) => sum + c.amountCents, 0);
-  expect(capturedCents).toBeLessThanOrEqual(b.priceCents);
+  // Recognised money (captures plus a paid fallback invoice) never exceeds the snapshot: no double charge.
+  const bookingInvoices = await db().select().from(invoices).where(eq(invoices.bookingId, bookingId));
+  const fallbackPaidCents = bookingInvoices
+    .filter((i) => i.kind === "fallback" && i.paypalInvoiceId)
+    .reduce((sum, i) => {
+      const remote = h.fake.invoices.get(i.paypalInvoiceId!);
+      return sum + (remote && (remote.status === "PAID" || remote.status === "PARTIALLY_PAID") ? remote.paidCents : 0);
+    }, 0);
+  expect(capturedCents + fallbackPaidCents).toBeLessThanOrEqual(b.priceCents);
+  // A completed capture and a payable fallback invoice never coexist.
+  const completed = [...h.fake.captures.values()].some(
+    (c) => authIds.has(c.authorizationId) && c.status === "COMPLETED",
+  );
+  const payableFallback = bookingInvoices.some(
+    (i) =>
+      i.kind === "fallback" &&
+      i.paypalInvoiceId &&
+      ["SENT", "PAID"].includes(h.fake.invoices.get(i.paypalInvoiceId)?.status ?? ""),
+  );
+  expect(completed && payableFallback).toBe(false);
   // No hold survives a terminal release.
   if (b.status === "voided" || b.status === "expired") expect(live).toHaveLength(0);
   // Payouts: at most one succeeded per source and technician; amounts are the floored share.

@@ -1,6 +1,6 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 
-import { authorizations, bookings, paypalOrders } from "@/db/schema";
+import { authorizations, bookings, paymentOperations, paypalOrders } from "@/db/schema";
 import { conflictMessage } from "@/server/domain/booking-state";
 import { honorUntil, reauthorizeAt } from "@/server/domain/reauth";
 import {
@@ -36,6 +36,8 @@ const AUTHORIZING_MS = 2 * MINUTE;
 /** PENDING (under review) authorizations keep the slot this much longer (SPEC §8.3). */
 const PENDING_HOLD_MS = 6 * 60 * MINUTE;
 const REUSABLE_ORDER = new Set(["CREATED", "PAYER_ACTION_REQUIRED", "APPROVED"]);
+/** PayPal expires unapproved orders; an older one is replaced by a new attempt. */
+const ORDER_REUSE_MS = 3 * 60 * MINUTE;
 
 export type PayStatus = "authorized" | "processing" | "declined_retry" | "expired";
 export type AuthorizeOutcome = { status: PayStatus; booking: Booking };
@@ -66,10 +68,18 @@ export async function createOrderForBooking(ctx: PaymentContext, bookingId: stri
   }
 
   const last = await latestOrder(db, bookingId);
-  if (last && last.amountCents === booking.priceCents && REUSABLE_ORDER.has(last.status)) {
+  const fresh = last && ctx.now().getTime() - last.createdAt.getTime() < ORDER_REUSE_MS;
+  if (last && fresh && last.amountCents === booking.priceCents && REUSABLE_ORDER.has(last.status)) {
     return { orderId: last.paypalOrderId };
   }
-  const attempt = (last?.attempt ?? 0) + 1;
+  // Resume an open create; never reuse an attempt number whose create failed (SPEC §10.3).
+  const ops = await db
+    .select({ key: paymentOperations.key, state: paymentOperations.state })
+    .from(paymentOperations)
+    .where(sql`${paymentOperations.key} like ${`order-create:${bookingId}:%`}`);
+  const attemptOf = (key: string) => Number(key.split(":")[2]);
+  const open = ops.find((o) => o.state === "in_flight");
+  const attempt = open ? attemptOf(open.key) : Math.max(last?.attempt ?? 0, ...ops.map((o) => attemptOf(o.key))) + 1;
   const workspace = await getWorkspace(db, booking.workspaceId);
   const requestId = paypal.requestId("order-create", bookingId, String(attempt));
 
@@ -99,7 +109,7 @@ export async function createOrderForBooking(ctx: PaymentContext, bookingId: stri
   return result;
 }
 
-type AuthInfo = {
+export type AuthInfo = {
   paypalAuthorizationId: string;
   status: string;
   amountCents: number;
@@ -143,7 +153,21 @@ export async function authorizeBooking(
       const inGrace =
         order.createdAt.getTime() <= b.holdExpiresAt.getTime() &&
         now.getTime() <= b.holdExpiresAt.getTime() + TTL_GRACE_MS;
-      if (late && !inGrace) return { ok: false as const, booking: b };
+      if (late && !inGrace) {
+        // A worker that claimed in time and is still running keeps its claim; only a crashed one
+        // (lease expired) is settled after the TTL by expiring the booking and voiding any hold (§24 #10).
+        const [running] = await tx
+          .select({ key: paymentOperations.key })
+          .from(paymentOperations)
+          .where(
+            and(
+              eq(paymentOperations.key, `authorize:${orderId}`),
+              eq(paymentOperations.state, "in_flight"),
+              gt(paymentOperations.leaseUntil, now),
+            ),
+          );
+        return { ok: false as const, booking: b, busy: Boolean(running) };
+      }
       await tx
         .update(bookings)
         .set({ authorizingUntil: new Date(now.getTime() + AUTHORIZING_MS), updatedAt: now })
@@ -157,6 +181,9 @@ export async function authorizeBooking(
   const requestId = paypal.requestId("order-authorize", orderId);
   const probe = async () => authInfo(await getOrder(paypal, orderId));
 
+  if (!claim.ok && "busy" in claim && claim.busy) {
+    return { status: "processing", booking: claim.booking };
+  }
   if (!claim.ok) {
     // Too late or already moved on. Never authorize now. A booking past TTL + grace expires first, so a
     // hold that may already exist (crash after authorize) is settled as an orphan, never as a booking.
@@ -197,8 +224,14 @@ export async function authorizeBooking(
           return authorized;
         } catch (error) {
           if (alreadyDoneOutcome("authorize", error) === "authorized") {
-            const existing = await probe();
+            // A failed lookup here must stay an unknown outcome, never a decline.
+            const existing = await probe().catch((lookup: unknown) => {
+              throw new Error(
+                `authorization lookup failed: ${lookup instanceof Error ? lookup.message : String(lookup)}`,
+              );
+            });
             if (existing) return existing;
+            throw new Error("PayPal says authorized, but the authorization can't be found yet");
           }
           throw error;
         }
@@ -222,6 +255,8 @@ function statusFor(b: Booking): PayStatus {
   if (b.status === "pending_payment")
     return b.paymentIssue === "authorization_pending" ? "processing" : "declined_retry";
   if (b.status === "expired") return "expired";
+  // Still flagged after a re-approval attempt: the new hold didn't take (SPEC §9.8).
+  if (isReapproval(b)) return "declined_retry";
   return "authorized";
 }
 
@@ -259,7 +294,8 @@ async function declined(ctx: PaymentContext, bookingId: string, orderId: string)
     .where(eq(bookings.id, bookingId))
     .returning();
   if (b.status === "pending_payment") ctx.notify(bookingId, "declined_retry");
-  return { status: b.status === "pending_payment" ? "declined_retry" : statusFor(b), booking: b };
+  const retryable = b.status === "pending_payment" || isReapproval(b);
+  return { status: retryable ? "declined_retry" : statusFor(b), booking: b };
 }
 
 /**
@@ -306,6 +342,8 @@ export async function applyAuthorization(
     }
 
     if (info.status === "PENDING") {
+      // A re-approval under review stays stored (not active yet); the poll applies it once it settles.
+      if (isReapproval(b)) return { kind: "pending" as const, booking: b };
       if (b.status !== "pending_payment") return { kind: "orphan" as const, booking: b, auth: stored };
       await tx
         .update(bookings)
@@ -372,6 +410,11 @@ export async function applyAuthorization(
       return { kind: "reapproved" as const, booking: cleared.booking, replaced };
     }
 
+    // Part of the booking's live chain (e.g. the parent of a reauthorized child): nothing to do.
+    if (b.activeAuthorizationId) {
+      const [active] = await tx.select().from(authorizations).where(eq(authorizations.id, b.activeAuthorizationId));
+      if (active?.parentAuthorizationId === stored.id) return { kind: "other" as const, booking: b };
+    }
     // The booking moved on (TTL, supersede, already authorized by another order): the hold is an orphan.
     await tx.update(authorizations).set({ role: "orphan" }).where(eq(authorizations.id, stored.id));
     return { kind: "orphan" as const, booking: b, auth: stored };

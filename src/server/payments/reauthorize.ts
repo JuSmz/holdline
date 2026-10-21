@@ -6,9 +6,11 @@ import { lockBooking, logBookingEvent, setPaymentIssue } from "@/server/domain/t
 import { payPalToCents } from "@/server/money";
 import { getAuthorization as getPayPalAuthorization, reauthorizeAuthorization } from "@/server/paypal/payments";
 
+import type { Tx } from "@/db/types";
+
 import type { PaymentContext } from "./context";
 import { DefiniteOperationError, OperationInProgressError, runOperation } from "./ledger";
-import { activeAuthorization, assertLive, getBooking } from "./queries";
+import { activeAuthorization, type AuthorizationRow, assertLive, getBooking } from "./queries";
 
 export type ReauthOutcome = "reauthorized" | "failed" | "processing" | "skipped";
 
@@ -69,37 +71,68 @@ export async function reauthorizeBooking(ctx: PaymentContext, bookingId: string)
     return "failed";
   }
   await db.transaction(async (tx) => {
-    const locked = await lockBooking(tx, bookingId);
-    const [row] = await tx
-      .insert(authorizations)
-      .values({
-        bookingId,
-        paypalAuthorizationId: child.paypalAuthorizationId,
-        parentAuthorizationId: parent.id,
-        paypalOrderId: parent.paypalOrderId,
-        status: child.status,
-        amountCents: child.amountCents,
-        honorUntil: honorUntil(child.createTime ? new Date(child.createTime) : ctx.now()),
-        validUntil: child.expirationTime ? new Date(child.expirationTime) : parent.validUntil,
-        role: "active",
-      })
-      .onConflictDoNothing({ target: authorizations.paypalAuthorizationId })
-      .returning();
-    if (row && locked.activeAuthorizationId === parent.id) {
-      await tx
-        .update(bookings)
-        .set({ activeAuthorizationId: row.id, updatedAt: ctx.now() })
-        .where(eq(bookings.id, bookingId));
-      await tx.update(authorizations).set({ reauthorizeAt: null }).where(eq(authorizations.id, parent.id));
-      await logBookingEvent(tx, {
-        bookingId,
-        actor: "system",
-        flag: "reauthorized",
-        detail: { parent: parent.paypalAuthorizationId, child: child.paypalAuthorizationId },
-      });
-    }
+    await linkReauthorizedChild(tx, {
+      bookingId,
+      parent,
+      child: { ...child, validUntil: child.expirationTime ? new Date(child.expirationTime) : parent.validUntil },
+      now: ctx.now(),
+    });
   });
   return "reauthorized";
+}
+
+/**
+ * Records a reauthorized child and makes it the capture target (SPEC §12). Idempotent and order-proof:
+ * the AUTHORIZATION.CREATED webhook may get here before the reauthorize response is recorded.
+ */
+export async function linkReauthorizedChild(
+  tx: Tx,
+  input: {
+    bookingId: string;
+    parent: AuthorizationRow;
+    child: {
+      paypalAuthorizationId: string;
+      status: string;
+      amountCents: number;
+      createTime: string | null;
+      validUntil: Date | null;
+    };
+    now: Date;
+  },
+): Promise<void> {
+  const locked = await lockBooking(tx, input.bookingId);
+  const values = {
+    bookingId: input.bookingId,
+    paypalAuthorizationId: input.child.paypalAuthorizationId,
+    parentAuthorizationId: input.parent.id,
+    paypalOrderId: input.parent.paypalOrderId,
+    status: input.child.status,
+    amountCents: input.child.amountCents,
+    honorUntil: honorUntil(input.child.createTime ? new Date(input.child.createTime) : input.now),
+    validUntil: input.child.validUntil,
+    role: "active" as const,
+  };
+  const [row] = await tx
+    .insert(authorizations)
+    .values(values)
+    .onConflictDoUpdate({
+      target: authorizations.paypalAuthorizationId,
+      set: { parentAuthorizationId: input.parent.id, role: "active", status: input.child.status, updatedAt: input.now },
+    })
+    .returning();
+  if (locked.status === "authorized" && locked.activeAuthorizationId === input.parent.id) {
+    await tx
+      .update(bookings)
+      .set({ activeAuthorizationId: row.id, updatedAt: input.now })
+      .where(eq(bookings.id, input.bookingId));
+    await tx.update(authorizations).set({ reauthorizeAt: null }).where(eq(authorizations.id, input.parent.id));
+    await logBookingEvent(tx, {
+      bookingId: input.bookingId,
+      actor: "system",
+      flag: "reauthorized",
+      detail: { parent: input.parent.paypalAuthorizationId, child: input.child.paypalAuthorizationId },
+    });
+  }
 }
 
 async function markReauthFailed(ctx: PaymentContext, bookingId: string, error: unknown) {

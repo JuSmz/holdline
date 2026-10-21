@@ -364,7 +364,7 @@ These are the only ones.
 
 ### 8.3 Payment flags
 
-These move sideways, so no status ever goes backwards. `payment_issue` is a single nullable enum, and every change is logged in `booking_events`.
+These move sideways, so no status ever goes backwards. `payment_issue` is a single nullable enum, and every change is logged in `booking_events`. **A status change always clears the flag** unless the transition sets a new one explicitly (e.g. a successful retry capture or a paid fallback invoice resolves `capture_failed`).
 
 | Flag                    | Set when                                                                                                          | Effect                                                                                                                                                                          |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -632,6 +632,7 @@ PayPal keeps request IDs for **≥ 6 h**; the docs contradict each other, so we 
    - **Success** → `succeeded`.
    - **Definitive business 4xx** → `failed`, with the error stored.
    - **Unknown outcome** (timeout, connection reset, 5xx after retries) → the row **stays `in_flight`** with `last_error`, and the lease is left to expire. It is never marked `failed`.
+   - **Classification (stage 6):** only a PayPal business 4xx on the API call itself (not 409 in progress, not an OAuth failure) is definite. Everything else, including our own DB errors after PayPal answered, is unknown. A capture that PayPal answers with `DECLINED`/`FAILED` is marked `failed` after the fact, so an owner retry may run under a new key.
 4. **Recovery:** the reconciler picks up `in_flight` rows whose lease has expired.
    - It **GETs the PayPal resource** first: order, authorization, capture list, payout batch, or a search for the invoice number.
    - If PayPal shows the operation as done → `succeeded`.
@@ -702,6 +703,8 @@ PayPal keeps request IDs for **≥ 6 h**; the docs contradict each other, so we 
 
 The real-sandbox reauthorization check runs on or after **10-26**, using authorizations created and left open in stage 2 (§27 R3).
 
+**Stage 6 status:** jobs 1, 3, 4, 5, 6 and 8 run behind `/api/jobs/tick`; 2 (outbox) and 7 (summaries) arrive with email and Gemini in stage 8; 9 and 10 with the phone demo and demo cleanup. The fake PayPal models a reauthorization chain as: the child is captured, the parent is voided (which also voids the child), the parent can't be captured after a reauthorization, and a child can't be voided (`CANNOT_BE_VOIDED`). The 10-26 sandbox check confirms or corrects this.
+
 ---
 
 ## 13. Agent
@@ -740,6 +743,8 @@ The real-sandbox reauthorization check runs on or after **10-26**, using authori
 | Chat     | No spelling. Keep replies short. Offer quick choices where natural.                                                                         |
 
 ### 13.2 Tools
+
+**Slots** (stage 5): two-hour arrival windows from each technician's working hours in the workspace timezone (Mon–Fri 8–18, Sat 9–13), one job per technician per window, no start sooner than 60 minutes from now, within the 14-day booking window. A slot is held by `authorized`, `cancelled` (until voided) and `pending_payment` within its TTL; a unique index on (technician, slot start) for live bookings settles races.
 
 The schemas are flat (no `anyOf`/`oneOf`), with primitives and enums only.
 
