@@ -59,6 +59,19 @@ Observations:
 - After a decline the order stays **approved** (`CHECKOUT.ORDER.APPROVED` arrived for the declined order `3L936651FS166391U`) at PayPal. Stage 6: the tab-closed recovery (`CHECKOUT.ORDER.APPROVED` webhook / reconciler) must NOT re-authorize an order whose last authorize ended in a definite decline; the payer has to approve again.
 - Order/authorize/capture round trips took 0.5–1.7 s from Render (oregon).
 
+## Stage 6: payment services on the sandbox (`/lab/bookings`, 2026-10-21/22, commit `5de91de`)
+
+The first end-to-end run through the product's own services (not the stage-2 lab routes), on Render.
+
+| Step                                | Observed                                                                                     | Result |
+| ----------------------------------- | -------------------------------------------------------------------------------------------- | ------ |
+| Create booking (next free slot)     | `HL-YZY3J`, Drain cleaning, Thu Oct 22 08:00–10:00 CT, $149.00 snapshot                      | ✅     |
+| createOrder → approve → authorize   | order `33N339691R958653A` → `authorized` (actor customer)                                    | ✅     |
+| Job done → full capture             | capture $149.00 `COMPLETED`, `completed → captured`, payout row $89.40 (60 %) in the same tx | ✅     |
+| Tick → payout → sync                | payout #1 $89.40 `processing` → `succeeded`, `captured → paid_out` (payouts_succeeded)       | ✅     |
+| Extra work                          | invoice `p1-HLYZY3J-X1` $25.00 created and sent (payer view link stored)                     | ✅     |
+| Reconciler confirms the ledger rows | tick report `reconcile_applied: 4` (all four operations matched the domain tables)           | ✅     |
+
 ## Reauthorization check (on or after 2026-10-26, stage 6)
 
 Run in `/lab/paypal` → "Act on an authorization" with the three holds left open on 2026-10-21. It confirms or corrects the reauthorization model the fake PayPal uses (SPEC §12, stage-6 status).
