@@ -89,6 +89,8 @@ const INTEGRATIONS = {
   paypalInvoicing: [{ name: "PAYPAL_BUSINESS_EMAIL" }],
   vapi: [
     { name: "VAPI_PRIVATE_KEY" },
+    // Server-only: /call/web accepts only the public key. Never sent to the browser.
+    { name: "VAPI_PUBLIC_KEY" },
     { name: "VAPI_ASSISTANT_ID" },
     { name: "VAPI_WEBHOOK_SECRET", secret: true },
     { name: "VAPI_LLM_PROVIDER" },

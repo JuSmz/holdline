@@ -45,7 +45,7 @@ Do these early. None of them depend on code, and several take time to become act
 |                    | 2. 4–6 US personal buyer accounts                                                                                                        | For judges. Their logins are shown publicly, which is fine for sandbox.                                                     |
 |                    | 3. 2 US personal accounts for Maya and Luis                                                                                              | Payout receivers                                                                                                            |
 |                    | 4. **Then** the REST app, type **Merchant**, linked to that US business account                                                          | Enable negative testing on the business account (optional)                                                                  |
-| Before stage 4     | **Vapi:** account and private key, then delete the public key or restrict it to no assistants                                            |                                                                                                                             |
+| Before stage 4     | **Vapi:** account, private key, and the public key restricted to the Holdline assistant (server env only, never in the browser)          |                                                                                                                             |
 | Before stage 4     | **Vapi budget decision**                                                                                                                 | Amount, **auto-reload off**, and the split into a development and a judging budget                                          |
 | Before stage 4     | Vapi free US number (optional)                                                                                                           | US bonus only                                                                                                               |
 | Before stage 7     | **Gemini:** AI Studio project with billing, an API key, and a **monthly spend cap or prepay**                                            |                                                                                                                             |
@@ -156,7 +156,7 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
 
 - A bare page `/lab/voice`:
   - `new Vapi("proxy", APP_URL + "/api/vapi-proxy")` with `@vapi-ai/web@3.0.0` pinned exactly
-  - `/api/vapi-proxy/call/web`, which discards the body and creates the call with the private key
+  - `/api/vapi-proxy/call/web`, which discards the body and creates the call with the server-only public key (`/call/web` rejects the private key)
 - **`scripts/vapi-setup.ts`, first version:** Bearer credential, **1 dummy tool**, a saved assistant (`silenceTimeoutSeconds: 240`, idle hook, `recordingEnabled: false`, `controlEnabled`). Running this script is free.
 - `/api/vapi/events` and `/api/vapi/tools`, which record raw payloads as fixtures.
 - A "simulate payment" button on the lab page that runs `notifyCall()`: a server `say` and then `add-message` through the controlUrl.
@@ -172,7 +172,7 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
 - The golden-path duration with a stopwatch, which sets `VAPI_MAX_CALL_SECONDS`.
 - Does the call survive 120 s of silence?
 
-**What you do:** the Vapi account and budget decision; `VAPI_PRIVATE_KEY` and `VAPI_WEBHOOK_SECRET` in `.env` and Render; delete the Vapi public key (or restrict it to no assistants); **OK the push**; a yes for each test call. If Vapi's API refuses to create the credential, create it once in the dashboard and put its ID into `.env` as `VAPI_CREDENTIAL_ID`. After the calls, download the fixtures from `/lab/voice` so they can go into the tests.
+**What you do:** the Vapi account and budget decision; `VAPI_PRIVATE_KEY`, `VAPI_PUBLIC_KEY` (restricted to the Holdline assistant) and `VAPI_WEBHOOK_SECRET` in `.env` and Render; **OK the push**; a yes for each test call. If Vapi's API refuses to create the credential, create it once in the dashboard and put its ID into `.env` as `VAPI_CREDENTIAL_ID`. After the calls, download the fixtures from `/lab/voice` so they can go into the tests.
 
 **Found while building (2026-10-21):** `silenceTimeoutSeconds` and the `call.timeElapsed` hook are no longer in Vapi's published assistant schema, and the credential endpoints are unpublished. The setup script sends `silenceTimeoutSeconds` anyway and reads the assistant back (R14); `call.timeElapsed` is dropped (SPEC §14.1).
 

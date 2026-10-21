@@ -83,3 +83,14 @@ export function getVapiClient(env: Record<string, string | undefined> = process.
   if (!apiKey) throw new VapiNotConfiguredError("VAPI_PRIVATE_KEY");
   return new VapiClient({ apiKey });
 }
+
+/**
+ * Client for `POST /call/web` only. Vapi rejects the private key there (401 "Invalid Key", checked
+ * 2026-10-21) and accepts only the public key. Ours lives in server env, restricted to the Holdline
+ * assistant, and never reaches the browser: the browser talks to our proxy (SPEC §14.3).
+ */
+export function getVapiWebCallClient(env: Record<string, string | undefined> = process.env): VapiClient {
+  const apiKey = readVar(env, "VAPI_PUBLIC_KEY");
+  if (!apiKey) throw new VapiNotConfiguredError("VAPI_PUBLIC_KEY");
+  return new VapiClient({ apiKey });
+}

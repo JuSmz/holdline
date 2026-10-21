@@ -21,6 +21,7 @@ export default async function VoiceLabPage() {
 
   const missing = [
     readVar(process.env, "VAPI_PRIVATE_KEY") ? null : "VAPI_PRIVATE_KEY",
+    readVar(process.env, "VAPI_PUBLIC_KEY") ? null : "VAPI_PUBLIC_KEY",
     readVar(process.env, "VAPI_ASSISTANT_ID") ? null : "VAPI_ASSISTANT_ID",
     readSecret(process.env, "VAPI_WEBHOOK_SECRET") ? null : "VAPI_WEBHOOK_SECRET (≥32 chars)",
   ].filter((m): m is string => m !== null);

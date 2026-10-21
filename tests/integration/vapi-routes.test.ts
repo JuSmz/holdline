@@ -197,10 +197,11 @@ describe("POST /api/vapi-proxy/call/web", () => {
 
   beforeEach(() => {
     vi.stubEnv("VAPI_PRIVATE_KEY", "private-key-test");
+    vi.stubEnv("VAPI_PUBLIC_KEY", "public-key-test");
     vi.stubEnv("VAPI_ASSISTANT_ID", "asst-holdline");
   });
 
-  it("discards the client body, creates the call with the private key, binds it and hides the controlUrl", async () => {
+  it("discards the client body, creates the call with the server-only public key, binds it and hides the controlUrl", async () => {
     const vapiCallId = `call-${randomUUID()}`;
     const outbound = stubFetch([
       {
@@ -230,7 +231,9 @@ describe("POST /api/vapi-proxy/call/web", () => {
     });
 
     expect(outbound).toHaveLength(1);
-    expect(outbound[0].headers.Authorization).toBe("Bearer private-key-test");
+    // /call/web rejects the private key; the public key stays on the server and never appears in the response.
+    expect(outbound[0].headers.Authorization).toBe("Bearer public-key-test");
+    expect(JSON.stringify(body)).not.toContain("public-key-test");
     expect(outbound[0].body).toEqual({
       assistantId: "asst-holdline",
       assistantOverrides: { variableValues: { channel: "web", first_name: "Lab", email: "lab-caller@example.com" } },
@@ -265,9 +268,16 @@ describe("POST /api/vapi-proxy/call/web", () => {
     expect(await res.json()).toMatchObject({ error: "vapi_error", status: 400, detail: "assistantId must be a UUID" });
   });
 
-  it("is 503 until the assistant is configured", async () => {
+  it("is 503 until the assistant and the public key are configured", async () => {
+    const outbound = stubFetch([]);
     vi.stubEnv("VAPI_ASSISTANT_ID", "");
     expect((await proxy(proxyRequest())).status).toBe(503);
+    vi.stubEnv("VAPI_ASSISTANT_ID", "asst-holdline");
+    vi.stubEnv("VAPI_PUBLIC_KEY", "");
+    const res = await proxy(proxyRequest());
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("VAPI_PUBLIC_KEY") });
+    expect(outbound).toHaveLength(0);
   });
 });
 

@@ -211,7 +211,7 @@ After the visit, one click in the dashboard captures the payment. Extra work is 
      │      POST /api/vapi-proxy/call/web          ┌──────────────────────────────┐
      ├────────────────────────────────────────────►│   Next.js 16 app on Render   │
      │  (cookie + caps checked, body discarded)    │                              │
-     │                                             │  /api/vapi-proxy/call/web ───┼──► Vapi POST /call/web (private key)
+     │                                             │  /api/vapi-proxy/call/web ───┼──► Vapi POST /call/web (public key, server)
      │◄── WebRTC audio (Daily) ── Vapi ◄───────────┤  /api/vapi/events  (Bearer)  │◄── assistant-request, status,
      │                              │ tool-calls ─►│  /api/vapi/tools   (Bearer)  │    end-of-call-report
      │                              │◄── say/add ──┤  notifyCall → controlUrl     │
@@ -824,10 +824,10 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
 1. **Browser:** `new Vapi("proxy", APP_URL + "/api/vapi-proxy")`, then `vapi.start()`. **VERIFY** in the spike that SDK 3.0.0 accepts a base URL; the fallback is 2.7.1.
 2. **`POST /api/vapi-proxy/call/web`:**
    - Checks `Origin` and the workspace cookie, then **atomically reserves** the caps (§22). If a cap is reached → 429, and the UI offers the chat.
-   - **Discards the client body** and calls `POST https://api.vapi.ai/call/web` with the **private key**: `{ assistantId, assistantOverrides: { variableValues: { channel: "web", first_name, email } } }`.
+   - **Discards the client body** and calls `POST https://api.vapi.ai/call/web` with the **server-only public key** (`VAPI_PUBLIC_KEY`; `/call/web` answers the private key with 401 "Invalid Key", checked 2026-10-21): `{ assistantId, assistantOverrides: { variableValues: { channel: "web", first_name, email } } }`.
    - Stores `calls { vapi_call_id, workspace_id, channel: web, control_url (if present) }`.
    - Returns only the fields `@vapi-ai/web` 3.0.0 reads to join (`id`, `webCallUrl`, `transport.callToken`, `artifactPlan.videoRecordingEnabled`, `assistant.voice.provider`). The controlUrl, prompt and tool config never reach the browser.
-3. **The Vapi public key is deleted** (or restricted to no assistants). Nobody can start calls on our assistant except through the proxy.
+3. **The Vapi public key never reaches the browser.** It lives only in server env, restricted in the Vapi dashboard to the Holdline assistant. A call started some other way has no binding and is ended at its first `in-progress` status-update (§14.5).
 
 ### 14.4 Phone calls through `assistant-request`
 

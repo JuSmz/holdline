@@ -3,14 +3,15 @@ import { readVar } from "@/server/config/env";
 import { dbErrorCode } from "@/server/db-error";
 import { labApiGuard } from "@/server/lab";
 import { bindWebCall, recordVapiEvent } from "@/server/vapi/calls";
-import { getVapiClient, VapiApiError, VapiNotConfiguredError } from "@/server/vapi/client";
+import { getVapiWebCallClient, VapiApiError, VapiNotConfiguredError } from "@/server/vapi/client";
 import { projectWebCall, webCallResponseSchema } from "@/server/vapi/web-call";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Web-call proxy for `new Vapi("proxy", origin + "/api/vapi-proxy")` (SPEC §14.3). The client body
- * is discarded: the server picks the assistant and its variables and calls Vapi with the private key.
+ * is discarded: the server picks the assistant and its variables and calls Vapi with the server-only
+ * public key (`/call/web` rejects the private key).
  * Stage 4: owner lab only. Stage 8 adds the /try workspace cookie and the caps.
  */
 export async function POST(request: Request) {
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
 
   let raw: unknown;
   try {
-    raw = await getVapiClient().post("/call/web", {
+    raw = await getVapiWebCallClient().post("/call/web", {
       assistantId,
       assistantOverrides: {
         variableValues: { channel: "web", first_name: "Lab", email: "lab-caller@example.com" },
