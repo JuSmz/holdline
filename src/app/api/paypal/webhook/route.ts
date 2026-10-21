@@ -2,6 +2,7 @@ import { getDb } from "@/db/client";
 import { webhookEvents } from "@/db/schema";
 import { readVar } from "@/server/config/env";
 import { getPayPalClient, labEnabled } from "@/server/paypal";
+import { eventResourceId, type PayPalEvent } from "@/server/paypal/webhook-events";
 import {
   readBodyLimited,
   readWebhookHeaders,
@@ -12,14 +13,6 @@ import {
 import { MemoryRateLimiter } from "@/server/security/memory-rate-limit";
 
 export const dynamic = "force-dynamic";
-
-type PayPalEvent = {
-  id?: unknown;
-  event_type?: unknown;
-  resource_type?: unknown;
-  summary?: unknown;
-  resource?: { id?: unknown };
-};
 
 /** Caps authenticated PayPal calls that unauthenticated webhook requests can trigger (SPEC §11). */
 const apiFallbackLimiter = new MemoryRateLimiter(30, 60_000);
@@ -71,7 +64,7 @@ export async function POST(request: Request) {
       paypalEventId: event.id.slice(0, 100),
       eventType: event.event_type.slice(0, 100),
       resourceType: typeof event.resource_type === "string" ? event.resource_type.slice(0, 100) : null,
-      resourceId: typeof event.resource?.id === "string" ? event.resource.id.slice(0, 100) : null,
+      resourceId: eventResourceId(event),
       summary: typeof event.summary === "string" ? event.summary.slice(0, 500) : null,
       raw: event,
       simulated: result.simulated,

@@ -140,7 +140,7 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
 
 - **`payouts.ts`:** create, get batch and item, cancel unclaimed, and recovery from a duplicate `sender_batch_id`.
 - **`invoicing.ts`:** create with our own `invoice_number`, send, get, search by number, cancel. `allow_tip: false` and partial payment off.
-- **`scripts/sandbox-smoke.ts`:** a $5 payout to Maya, then create and send an invoice and look it up by number. Includes payout negative tests through `items[0].note` codes.
+- **`scripts/sandbox-smoke.ts`:** a $1 payout to Maya (polled to SUCCESS), a duplicate-sender_batch_id probe, then create and send an invoice and look it up by number. Includes payout negative tests through `items[0].note` codes.
 - Lab buttons for both.
 - **`docs/sandbox-report.md`:** what we actually saw (no secrets). Answers R1–R3 and R10 so far, and lists the webhooks that arrived.
 

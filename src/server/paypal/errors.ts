@@ -5,6 +5,8 @@ export class PayPalApiError extends Error {
   readonly issue: string | undefined;
   readonly debugId: string | undefined;
   readonly details: { issue?: string; description?: string; field?: string }[];
+  /** HATEOAS links from the error body (e.g. the original payout on a duplicate sender_batch_id). */
+  readonly links: { href: string; rel?: string; method?: string }[];
   /** "oauth" when the token request failed — the API request itself was never sent. */
   readonly phase: "api" | "oauth";
 
@@ -15,6 +17,7 @@ export class PayPalApiError extends Error {
     issue?: string;
     debugId?: string;
     details?: { issue?: string; description?: string; field?: string }[];
+    links?: { href: string; rel?: string; method?: string }[];
     phase?: "api" | "oauth";
   }) {
     super(
@@ -28,6 +31,7 @@ export class PayPalApiError extends Error {
     this.issue = init.issue;
     this.debugId = init.debugId;
     this.details = init.details ?? [];
+    this.links = init.links ?? [];
     this.phase = init.phase ?? "api";
   }
 }
@@ -55,10 +59,14 @@ export async function parsePayPalError(response: Response, phase: "api" | "oauth
     name?: string;
     message?: string;
     debug_id?: string;
-    details?: { issue?: string; description?: string; field?: string }[];
+    details?: { issue?: string; description?: string; field?: string; link?: { href: string; rel?: string }[] }[];
+    links?: { href: string; rel?: string; method?: string }[];
     error?: string;
     error_description?: string;
   };
+  const links = [...(b.links ?? []), ...(b.details ?? []).flatMap((d) => d.link ?? [])].filter(
+    (l): l is { href: string; rel?: string; method?: string } => typeof l?.href === "string",
+  );
   return new PayPalApiError({
     status: response.status,
     errorName: b.name ?? b.error,
@@ -66,6 +74,7 @@ export async function parsePayPalError(response: Response, phase: "api" | "oauth
     issue: b.details?.[0]?.issue,
     debugId: b.debug_id ?? debugHeader,
     details: b.details,
+    links,
     phase,
   });
 }

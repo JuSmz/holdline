@@ -232,3 +232,16 @@ describe("hardening from review", () => {
     expect(JSON.parse(sentBody).webhook_id).toBe(WEBHOOK_ID);
   });
 });
+
+describe("eventResourceId", () => {
+  it("finds the resource ID for every event family", async () => {
+    const { eventResourceId } = await import("@/server/paypal/webhook-events");
+    expect(eventResourceId({ resource: { id: "AUTH-1" } })).toBe("AUTH-1");
+    expect(eventResourceId({ resource: { invoice: { id: "INV2-AAAA-BBBB-CCCC-DDDD" } } })).toBe(
+      "INV2-AAAA-BBBB-CCCC-DDDD",
+    );
+    expect(eventResourceId({ resource: { payout_item_id: "WGGV2KUQXV7M4" } })).toBe("WGGV2KUQXV7M4");
+    expect(eventResourceId({ resource: { batch_header: { payout_batch_id: "22NZAZ69HVVSS" } } })).toBe("22NZAZ69HVVSS");
+    expect(eventResourceId({})).toBeNull();
+  });
+});

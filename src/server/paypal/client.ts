@@ -42,6 +42,14 @@ export type CallOptions = {
   mockResponse?: string;
   /** Pulls resource IDs out of a successful response body for the API log. */
   idsFrom?: (data: unknown) => Record<string, string>;
+  /** Pulls the resource status for the API log (default: `data.status`). */
+  statusFrom?: (data: unknown) => string | null;
+  /**
+   * Retry network errors, 5xx, 409 and unreadable 2xx bodies with the same request ID (default true).
+   * Set false for APIs that do NOT honor PayPal-Request-Id (Invoicing create/cancel): the caller must
+   * recover an unknown outcome itself instead of blindly re-POSTing.
+   */
+  retry?: boolean;
 };
 
 export type PostOptions = CallOptions & {
@@ -124,12 +132,13 @@ export class PayPalClient {
     }
     const started = this.opts.now();
     const payload = body === undefined ? undefined : body instanceof RawJson ? body.text : JSON.stringify(body);
+    const maxAttempts = options.retry === false ? 1 : MAX_ATTEMPTS;
     let attempts = 0;
     let refreshedToken = false;
     let lastError: unknown;
     let lastStatus: number | null = null;
 
-    while (attempts < MAX_ATTEMPTS) {
+    while (attempts < maxAttempts) {
       attempts += 1;
 
       // 1) Token. A failure here means the API request was never sent (phase "oauth").
@@ -142,7 +151,7 @@ export class PayPalClient {
             ? error
             : new PayPalApiError({ status: 0, errorName: "OAUTH_NETWORK_ERROR", phase: "oauth" });
         const retryable = !(error instanceof PayPalApiError) || error.status >= 500;
-        if (retryable && attempts < MAX_ATTEMPTS) {
+        if (retryable && attempts < maxAttempts) {
           await this.backoff(attempts);
           continue;
         }
@@ -171,7 +180,7 @@ export class PayPalClient {
       } catch (error) {
         lastError = new PayPalNetworkError(`${method} ${path} failed: ${(error as Error).message}`, { cause: error });
         lastStatus = null;
-        if (attempts < MAX_ATTEMPTS) await this.backoff(attempts);
+        if (attempts < maxAttempts) await this.backoff(attempts);
         continue;
       }
 
@@ -192,7 +201,7 @@ export class PayPalClient {
         } catch (error) {
           lastError = new PayPalNetworkError(`${method} ${path}: unreadable ${response.status} body`, { cause: error });
           lastStatus = response.status;
-          if (attempts < MAX_ATTEMPTS) await this.backoff(attempts);
+          if (attempts < maxAttempts) await this.backoff(attempts);
           continue;
         }
         this.log({
@@ -202,7 +211,7 @@ export class PayPalClient {
           httpStatus: response.status,
           requestId: options.requestId ?? null,
           resourceIds: safeIds(options.idsFrom, data),
-          resourceStatus: statusOf(data),
+          resourceStatus: safeStatus(options.statusFrom, data),
           debugId: response.headers.get("paypal-debug-id"),
           issue: null,
           attempts,
@@ -214,7 +223,7 @@ export class PayPalClient {
       const error = await parsePayPalError(response);
       lastError = error;
       lastStatus = error.status;
-      if (isRetryableApiError(error) && attempts < MAX_ATTEMPTS) {
+      if (isRetryableApiError(error) && attempts < maxAttempts) {
         await this.backoff(attempts);
         continue;
       }
@@ -287,6 +296,14 @@ export class PayPalClient {
 export function isUnknownOutcome(error: unknown): boolean {
   if (error instanceof PayPalNetworkError) return true;
   return error instanceof PayPalApiError && error.phase === "api" && (error.status >= 500 || isInProgress(error));
+}
+
+function safeStatus(extract: CallOptions["statusFrom"], data: unknown): string | null {
+  try {
+    return extract ? extract(data) : statusOf(data);
+  } catch {
+    return null;
+  }
 }
 
 function statusOf(data: unknown): string | null {
