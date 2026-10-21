@@ -1024,7 +1024,7 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
   - **Atomic:** `INSERT … ON CONFLICT (scope, key, window) DO UPDATE SET n = n + 1 RETURNING n`.
   - **What is limited:** workspace creation, call starts, chat turns, pay-order creation, emails, claims and logins.
   - **The real protection is the global caps.** Per-IP and per-workspace limits come second.
-  - **Client IP:** one helper using Render's proxy entry, never the leftmost `X-Forwarded-For` entry. **VERIFY** in stage 1 with a forged header. Addresses are hashed with HMAC; IPv6 by its /64 prefix.
+  - **Client IP:** one helper. Verified on Render on 2026-10-21 (R16): Render sits behind Cloudflare, which **appends** to a client-supplied `X-Forwarded-For` (the leftmost entry is forgeable) but **overwrites** `CF-Connecting-IP` and `True-Client-IP` with the real client IP (a forged `CF-Connecting-IP` is rejected with Cloudflare error 1000). The helper uses `CF-Connecting-IP`, then `True-Client-IP`, and never `X-Forwarded-For`; requests over the private network (cron) have none and count as internal. Addresses are hashed with HMAC; IPv6 by its /64 prefix.
 - **CSP:** nonce-based, set in `proxy.ts`:
   - `script-src 'self' 'nonce-…' 'strict-dynamic' https://www.sandbox.paypal.com`
   - `frame-src https://www.sandbox.paypal.com`
@@ -1287,7 +1287,7 @@ databases:
 | R13 | Web SDK 3.0.0 proxy base URL                                              | Spike; fallback 2.7.1                                                                                                                                                      | 4     |
 | R14 | `silenceTimeoutSeconds` / hooks accepted by the API                       | Set through a cast, then GET to confirm                                                                                                                                    | 4     |
 | R15 | Speech latency of the `say` push                                          | Measure, target ≤ 2 s                                                                                                                                                      | 4, 8  |
-| R16 | Render `X-Forwarded-For` semantics                                        | Forged-header test                                                                                                                                                         | 1     |
+| R16 | ~~Render `X-Forwarded-For` semantics~~                                    | **Resolved 2026-10-21:** use `CF-Connecting-IP` / `True-Client-IP`; XFF is appended, not replaced (see §20)                                                                | 1     |
 | R17 | Cron `fromService` wiring                                                 | Deployed tick returns 200; `last_tick_at` in health                                                                                                                        | 1     |
 | R18 | Gemini thought signatures in the chat history                             | Store raw `Content[]`, or use the Interactions API; fixture test                                                                                                           | 7     |
 | R19 | Resend reputation on the user's domain                                    | Opt-in, caps, suppression, auto-pause, subdomain                                                                                                                           | 8     |
