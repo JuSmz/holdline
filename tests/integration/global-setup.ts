@@ -1,10 +1,11 @@
 import postgres from "postgres";
 
 import { runMigrations } from "../../src/db/migrate";
+import { seedMainWorkspace } from "../../src/db/seed";
 
 const url = process.env.DATABASE_URL_TEST ?? "postgres://postgres@localhost:55433/holdline_test";
 
-/** Creates the test database if needed and applies the production migrations to it. */
+/** Creates the test database if needed, applies the production migrations and seeds the main workspace. */
 export default async function setup() {
   const target = new URL(url);
   const dbName = target.pathname.replace(/^\//, "");
@@ -23,4 +24,6 @@ export default async function setup() {
   }
 
   await runMigrations(url);
+  // Tests bind calls to the main workspace; seeding here keeps them independent of file order.
+  await seedMainWorkspace(url);
 }

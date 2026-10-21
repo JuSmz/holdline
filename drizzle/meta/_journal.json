@@ -15,6 +15,13 @@
       "when": 1792597987173,
       "tag": "0001_paypal_log_webhooks_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792605624232,
+      "tag": "0002_calls_vapi_events",
+      "breakpoints": true
     }
   ]
 }

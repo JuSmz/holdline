@@ -78,6 +78,64 @@ export const webhookEvents = pgTable(
   (t) => [index("webhook_events_received_idx").on(t.receivedAt)],
 );
 
+export const callChannel = pgEnum("call_channel", ["web", "phone", "chat"]);
+
+/**
+ * One row per conversation (SPEC §7). Stage 4 creates it for voice calls: the server-side
+ * binding that webhooks and tools are scoped by. `control_url` is never sent to the client.
+ */
+export const calls = pgTable(
+  "calls",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id),
+    channel: callChannel("channel").notNull(),
+    vapiCallId: text("vapi_call_id").unique(),
+    vapiCallType: text("vapi_call_type"),
+    /** Started from the owner lab (stage 4 spike), not from /try or the phone line. */
+    lab: boolean("lab").notNull().default(false),
+    controlUrl: text("control_url"),
+    status: text("status").notNull().default("created"),
+    llmModel: text("llm_model"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    durationS: integer("duration_s"),
+    transcript: text("transcript"),
+    messages: jsonb("messages").$type<unknown>(),
+    /** Vapi's `artifact.performanceMetrics` (turn latencies) from the end-of-call report. */
+    metrics: jsonb("metrics").$type<unknown>(),
+    costCents: integer("cost_cents"),
+    endedReason: text("ended_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("calls_created_idx").on(t.createdAt)],
+);
+
+/**
+ * Authenticated Vapi webhook payloads and our web-call create responses, kept raw as fixtures
+ * (stage 4) and for debugging. Contains transcripts: purged with the call data (SPEC §21).
+ */
+export const vapiEvents = pgTable(
+  "vapi_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    endpoint: text("endpoint").notNull(),
+    messageType: text("message_type").notNull(),
+    vapiCallId: text("vapi_call_id"),
+    callType: text("call_type"),
+    payload: jsonb("payload").$type<unknown>().notNull(),
+  },
+  (t) => [index("vapi_events_received_idx").on(t.receivedAt), index("vapi_events_call_idx").on(t.vapiCallId)],
+);
+
 /** Owner sessions: random server-side IDs created by POST login with ADMIN_TOKEN (SPEC §20). */
 export const adminSessions = pgTable("admin_sessions", {
   id: text("id").primaryKey(),

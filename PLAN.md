@@ -172,7 +172,9 @@ You enter every secret yourself: in `.env` locally, and by hand in the Render da
 - The golden-path duration with a stopwatch, which sets `VAPI_MAX_CALL_SECONDS`.
 - Does the call survive 120 s of silence?
 
-**What you do:** the Vapi account and budget decision; `VAPI_PRIVATE_KEY` and `VAPI_WEBHOOK_SECRET` in `.env` and Render; **OK the push**; a yes for each test call.
+**What you do:** the Vapi account and budget decision; `VAPI_PRIVATE_KEY` and `VAPI_WEBHOOK_SECRET` in `.env` and Render; delete the Vapi public key (or restrict it to no assistants); **OK the push**; a yes for each test call. If Vapi's API refuses to create the credential, create it once in the dashboard and put its ID into `.env` as `VAPI_CREDENTIAL_ID`. After the calls, download the fixtures from `/lab/voice` so they can go into the tests.
+
+**Found while building (2026-10-21):** `silenceTimeoutSeconds` and the `call.timeElapsed` hook are no longer in Vapi's published assistant schema, and the credential endpoints are unpublished. The setup script sends `silenceTimeoutSeconds` anyway and reads the assistant back (R14); `call.timeElapsed` is dropped (SPEC §14.1).
 
 **Done when:** every item above is answered, and `VAPI_LLM_MODEL` and `VAPI_MAX_CALL_SECONDS` are chosen from the measurements.
 
