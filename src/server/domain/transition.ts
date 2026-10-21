@@ -4,14 +4,7 @@ import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { bookingEvents, bookings } from "@/db/schema";
 import type { Executor, Tx } from "@/db/types";
 
-import {
-  type BookingStatus,
-  canSetFlag,
-  canTransition,
-  conflictMessage,
-  flagsAllowedIn,
-  type PaymentIssue,
-} from "./booking-state";
+import { type BookingStatus, canSetFlag, canTransition, conflictMessage, type PaymentIssue } from "./booking-state";
 
 export type Booking = typeof bookings.$inferSelect;
 export type Actor = (typeof bookingEvents.$inferInsert)["actor"];
@@ -50,7 +43,7 @@ type TransitionInput = {
   actor: Actor;
   reason?: string;
   detail?: Record<string, unknown>;
-  /** undefined keeps the current flag when it is valid in `to`; null clears; a value sets it. */
+  /** A flag for the new status. Flags never carry across a status change: omitted or null clears it. */
   flag?: PaymentIssue | null;
   /** Extra columns written in the same CAS (never status, version or the price snapshot). */
   patch?: Omit<PgUpdateSetSource<typeof bookings>, "status" | "version" | "priceCents" | "noShowFeeCents">;
@@ -78,13 +71,9 @@ export async function transitionBooking(tx: Tx, input: TransitionInput): Promise
     throw new TransitionConflictError(current.status, input.to);
   }
 
-  const allowed = flagsAllowedIn(input.to);
-  const nextFlag =
-    input.flag !== undefined
-      ? input.flag
-      : current.paymentIssue && allowed.includes(current.paymentIssue)
-        ? current.paymentIssue
-        : null;
+  // §8.3: a flag describes a problem in the current status; entering a new status resolves it (e.g. a
+  // successful retry capture or a paid fallback invoice clears capture_failed). New flags are explicit.
+  const nextFlag = input.flag ?? null;
 
   const now = new Date();
   const [updated] = await tx

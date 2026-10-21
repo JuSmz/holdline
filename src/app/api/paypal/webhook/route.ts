@@ -1,7 +1,12 @@
+import { eq } from "drizzle-orm";
+
 import { getDb } from "@/db/client";
 import { webhookEvents } from "@/db/schema";
 import { readVar } from "@/server/config/env";
-import { getPayPalClient, labEnabled } from "@/server/paypal";
+import { dbErrorCode } from "@/server/db-error";
+import { defaultContext } from "@/server/payments/context";
+import { processWebhookEvent } from "@/server/payments/webhook-processor";
+import { getPayPalClient, labEnabled, PayPalNotConfiguredError } from "@/server/paypal";
 import { eventResourceId, type PayPalEvent } from "@/server/paypal/webhook-events";
 import {
   readBodyLimited,
@@ -20,9 +25,10 @@ const apiFallbackLimiter = new MemoryRateLimiter(30, 60_000);
 const reject = (status: number, error: string) => Response.json({ ok: false, error }, { status });
 
 /**
- * PayPal webhook receiver (SPEC §11). Stage 2: verify and store. Processing (re-GET the
- * resource, drive the booking state machine) arrives in stage 6; `processed_at` stays null until then.
- * Unverified requests get a 4xx and are never stored.
+ * PayPal webhook receiver (SPEC §11): verify, store (deduplicated by event ID), then process — re-GET
+ * the resource and drive the booking through the same CAS and ledger functions. 200 on success, 500 on
+ * a handler error so PayPal retries (the reconciler re-drives it too). Unverified requests get a 4xx
+ * and are never stored.
  */
 export async function POST(request: Request) {
   const webhookId = readVar(process.env, "PAYPAL_WEBHOOK_ID");
@@ -73,5 +79,27 @@ export async function POST(request: Request) {
     .onConflictDoNothing({ target: webhookEvents.paypalEventId })
     .returning({ id: webhookEvents.id });
 
-  return Response.json({ ok: true, duplicate: inserted.length === 0 });
+  const duplicate = inserted.length === 0;
+  const [row] = duplicate
+    ? await getDb()
+        .select({ id: webhookEvents.id, processedAt: webhookEvents.processedAt })
+        .from(webhookEvents)
+        .where(eq(webhookEvents.paypalEventId, event.id.slice(0, 100)))
+    : inserted.map((r) => ({ id: r.id, processedAt: null }));
+  if (!row || row.processedAt) return Response.json({ ok: true, duplicate });
+
+  let ctx;
+  try {
+    ctx = defaultContext();
+  } catch (error) {
+    if (error instanceof PayPalNotConfiguredError) return Response.json({ ok: true, duplicate, processed: false });
+    throw error;
+  }
+  try {
+    await processWebhookEvent(ctx, row.id);
+  } catch (error) {
+    console.error(`[holdline] PayPal webhook ${event.event_type} processing failed: ${dbErrorCode(error)}`);
+    return reject(500, "processing_failed");
+  }
+  return Response.json({ ok: true, duplicate });
 }

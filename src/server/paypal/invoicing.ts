@@ -39,8 +39,9 @@ export type Invoice = {
 const INVOICE_NUMBER = /^[A-Za-z0-9-]{1,25}$/;
 
 /** `<instance>-<ref>-X<n>`, e.g. `p1-HL7K3Q9-X1` (SPEC §10.4). */
-export function makeInvoiceNumber(instanceId: string, ref: string, n: number): string {
-  const number = `${instanceId}-${ref.replace(/[^A-Za-z0-9]/g, "")}-X${n}`;
+/** `<instance>-<ref>-X<n>` for extra work, `-F<n>` for a fallback invoice (SPEC §9.6, §9.7). */
+export function makeInvoiceNumber(instanceId: string, ref: string, n: number, kind: "X" | "F" = "X"): string {
+  const number = `${instanceId}-${ref.replace(/[^A-Za-z0-9]/g, "")}-${kind}${n}`;
   if (!INVOICE_NUMBER.test(number)) throw new Error(`invoice number too long or invalid: ${number}`);
   return number;
 }

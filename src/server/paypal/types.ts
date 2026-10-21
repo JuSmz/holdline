@@ -14,6 +14,7 @@ export type Authorization = {
   expiration_time?: string;
   create_time?: string;
   update_time?: string;
+  supplementary_data?: { related_ids?: { order_id?: string } };
   links?: { href: string; rel: string; method?: string }[];
 };
 

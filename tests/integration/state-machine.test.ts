@@ -2,8 +2,9 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "@/db/client";
-import { bookingEvents, bookings, payouts, services, technicians, workspaces } from "@/db/schema";
+import { bookingEvents, bookings, calls, payouts, services, technicians, workspaces } from "@/db/schema";
 import { seedCatalog, seedSampleHistory, SERVICES } from "@/db/seed-data";
+import { newBookingRef } from "@/server/domain/refs";
 import {
   logBookingEvent,
   setPaymentIssue,
@@ -21,6 +22,7 @@ const pgError = (e: unknown) => {
   const err = e as { code?: string; cause?: { code?: string } };
   return err.cause?.code ?? err.code;
 };
+const constraint = (e: unknown) => (e as { cause?: { constraint_name?: string } }).cause?.constraint_name;
 
 describe("database guards (SPEC §8.4)", () => {
   it("rejects a backward or skipping status change in raw SQL, allows a legal one", async () => {
@@ -52,11 +54,9 @@ describe("database guards (SPEC §8.4)", () => {
     const db = getDb();
     const ws = await makeWorkspace(db);
     const b = await makeBooking(db, ws.id);
-    const { technicianId, slotStart } = b;
-    const copy = { ...b, id: undefined, ref: `HL-${b.ref.slice(3, 7)}Z`, version: 0 };
-    delete copy.id;
-    await expect(db.insert(bookings).values({ ...copy, technicianId, slotStart })).rejects.toSatisfy(
-      (e) => pgError(e) === "23505",
+    const copy = () => ({ ...b, id: undefined, ref: newBookingRef(), version: 0 });
+    await expect(db.insert(bookings).values(copy())).rejects.toSatisfy(
+      (e) => pgError(e) === "23505" && constraint(e) === "bookings_live_slot_uq",
     );
     // Once the first one expires, the slot is free again.
     await db.transaction((tx) =>
@@ -68,7 +68,18 @@ describe("database guards (SPEC §8.4)", () => {
         reason: "ttl",
       }),
     );
-    await db.insert(bookings).values({ ...copy, technicianId, slotStart });
+    await db.insert(bookings).values(copy());
+  });
+
+  it("deletes a whole workspace with its calls, bookings, sample history and audit log", async () => {
+    const db = getDb();
+    const ws = await makeWorkspace(db);
+    await seedSampleHistory(db, ws.id, new Date());
+    const b = await makeBooking(db, ws.id);
+    await logBookingEvent(db, { bookingId: b.id, actor: "system", flag: "note" });
+    await db.delete(workspaces).where(eq(workspaces.id, ws.id));
+    expect(await db.select().from(bookings).where(eq(bookings.workspaceId, ws.id))).toHaveLength(0);
+    expect(await db.select().from(calls).where(eq(calls.workspaceId, ws.id))).toHaveLength(0);
   });
 });
 
@@ -151,7 +162,7 @@ describe("payment flags (SPEC §8.3)", () => {
     expect(events.map((e) => e.flag)).toEqual(["+authorization_pending", "-authorization_pending"]);
   });
 
-  it("carries a flag forward when it stays valid, and sets one in the same CAS", async () => {
+  it("never carries a flag into a new status, and sets one in the same CAS when asked", async () => {
     const db = getDb();
     const ws = await makeWorkspace(db);
     const b = await makeBooking(db, ws.id, { status: "authorized" });
@@ -164,10 +175,12 @@ describe("payment flags (SPEC §8.3)", () => {
         flag: "capture_failed",
       }),
     );
+    expect((await bookingById(db, b.id)).paymentIssue).toBe("capture_failed");
+    // A successful retry capture (or a paid fallback invoice) resolves capture_failed: payouts may proceed.
     const r = await db.transaction((tx) =>
       transitionBooking(tx, { bookingId: b.id, from: "completed", to: "captured", actor: "system" }),
     );
-    expect(r.booking.paymentIssue).toBe("capture_failed");
+    expect(r.booking.paymentIssue).toBeNull();
     const cleared = await db.transaction((tx) =>
       setPaymentIssue(tx, { bookingId: b.id, flag: null, clearOnly: "payout_failed", actor: "system" }),
     );
@@ -207,8 +220,7 @@ describe("seeding (SPEC §17)", () => {
       ["paid_out", true],
       ["voided", true],
     ]);
-    const sampleRefs = rows.map((r) => r.ref);
-    expect(sampleRefs.every((ref) => /^HL-[ST][0-9A-F]{4}$/.test(ref))).toBe(true);
+    expect(rows.every((r) => /^HL-[0-9A-HJKMNP-TV-Z]{5}$/.test(r.ref))).toBe(true);
     const payoutRows = await db.select().from(payouts).where(eq(payouts.workspaceId, ws.id));
     expect(payoutRows).toMatchObject([{ status: "succeeded", sample: true, amountCents: 8_940 }]);
   });

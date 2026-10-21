@@ -36,6 +36,8 @@ export default defineConfig({
             DATABASE_URL: TEST_DATABASE_URL,
             PAYPAL_ENV: "sandbox",
             APP_INSTANCE_ID: "t-int",
+            // Test-only value; the boot config and token signing need ≥ 32 characters.
+            SESSION_SECRET: "integration-test-session-secret-0123456789",
           },
         },
       },

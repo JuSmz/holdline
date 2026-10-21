@@ -8,7 +8,6 @@ import { STANDARD_HOURS } from "@/db/seed-data";
 import { findSlots, readSlotId, slotId, windowsOn } from "@/server/domain/availability";
 import {
   BOOKING_STATUSES,
-  type BookingStatus,
   canSetFlag,
   canTransition,
   conflictMessage,
@@ -16,7 +15,6 @@ import {
   isTerminal,
   PAYMENT_ISSUES,
   STATUS_RANK,
-  TRANSITIONS,
 } from "@/server/domain/booking-state";
 import { DEFAULT_POLICY, isLateCancellation, policyOf } from "@/server/domain/policy";
 import { extraWorkLines, payoutCents, priceSnapshot } from "@/server/domain/pricing";
@@ -65,15 +63,21 @@ describe("state machine tables (SPEC §8)", () => {
     expect(BOOKING_STATUSES.filter(isTerminal).sort()).toEqual(["expired", "paid_out", "voided"]);
   });
 
-  it("allows each flag only in its statuses", () => {
+  it("allows each flag only in the statuses of SPEC §8.3", () => {
+    const SPEC_FLAGS = {
+      authorization_pending: ["pending_payment"],
+      reauth_failed: ["authorized"],
+      hold_lost: ["authorized"],
+      capture_failed: ["completed", "no_show", "cancelled", "captured"],
+      capture_pending: ["captured"],
+      payout_failed: ["captured"],
+    };
     for (const flag of PAYMENT_ISSUES) {
+      expect([...FLAG_STATUSES[flag]].sort()).toEqual([...SPEC_FLAGS[flag]].sort());
       for (const status of BOOKING_STATUSES) {
-        expect(canSetFlag(status, flag)).toBe(FLAG_STATUSES[flag].includes(status));
+        expect(canSetFlag(status, flag)).toBe(SPEC_FLAGS[flag].includes(status));
       }
     }
-    expect(canSetFlag("pending_payment", "authorization_pending")).toBe(true);
-    expect(canSetFlag("authorized", "capture_failed")).toBe(false);
-    expect(canSetFlag("captured", "capture_pending")).toBe(true);
   });
 
   it("gives every status a visible conflict message", () => {
@@ -81,20 +85,8 @@ describe("state machine tables (SPEC §8)", () => {
     expect(conflictMessage("no_show")).toBe("Already marked as no-show.");
   });
 
-  it("property: any sequence of attempted transitions never lowers the rank", () => {
-    fc.assert(
-      fc.property(fc.array(fc.constantFrom(...BOOKING_STATUSES), { maxLength: 40 }), (attempts) => {
-        let status: BookingStatus = "pending_payment";
-        for (const to of attempts) {
-          if (!canTransition(status, to)) continue;
-          expect(STATUS_RANK[to]).toBeGreaterThan(STATUS_RANK[status]);
-          status = to;
-        }
-        if (isTerminal(status)) expect(TRANSITIONS[status]).toHaveLength(0);
-      }),
-      { numRuns: 500 },
-    );
-  });
+  // The money and rank property over the real services and database lives in
+  // tests/integration/payments-property.test.ts (SPEC §8.5).
 });
 
 describe("pricing and payout math (SPEC §9.1)", () => {
@@ -252,11 +244,22 @@ describe("time zone and slots, including the US DST change on 2026-11-01", () =>
   });
 
   it("skips busy slots, respects lead time, time of day and the booking window", () => {
-    const now = new Date("2026-10-26T12:30:00Z"); // Mon 07:30 CDT
-    const busy = [{ technicianId: "maya", slotStart: new Date("2026-10-26T13:00:00Z") }];
-    expect(findSlots({ ...base, now, busy, preferredDate: "2026-10-26" })[0].start.toISOString()).toBe(
+    const now = new Date("2026-10-26T12:30:00Z"); // Mon 07:30 CDT: the 08:00 window is inside the lead time
+    expect(findSlots({ ...base, now, preferredDate: "2026-10-26" })[0].start.toISOString()).toBe(
       "2026-10-26T15:00:00.000Z",
     );
+    const busy = [{ technicianId: "maya", slotStart: new Date("2026-10-26T15:00:00Z") }];
+    expect(findSlots({ ...base, now, busy, preferredDate: "2026-10-26" }).map((s) => s.start.toISOString())).toEqual([
+      "2026-10-26T17:00:00.000Z",
+      "2026-10-26T19:00:00.000Z",
+      "2026-10-26T21:00:00.000Z",
+    ]);
+    const morning = findSlots({ ...base, now, preferredDate: "2026-10-26", timeOfDay: "morning" });
+    expect(morning.map((s) => s.label)).toEqual([
+      "Mon, Oct 26, 10:00–12:00 CT",
+      "Tue, Oct 27, 08:00–10:00 CT",
+      "Tue, Oct 27, 10:00–12:00 CT",
+    ]);
     const afternoon = findSlots({ ...base, now, preferredDate: "2026-10-26", timeOfDay: "afternoon" });
     expect(afternoon.map((s) => s.label)).toEqual([
       "Mon, Oct 26, 12:00–14:00 CT",
@@ -265,6 +268,18 @@ describe("time zone and slots, including the US DST change on 2026-11-01", () =>
     ]);
     expect(findSlots({ ...base, now, preferredDate: "2026-11-20" })).toEqual([]);
     expect(findSlots({ ...base, category: "roofing", now, preferredDate: "2026-10-26" })).toEqual([]);
+  });
+
+  it("offers a second technician when the first is busy, and each start only once", () => {
+    const now = new Date("2026-10-26T12:30:00Z");
+    const ana = { ...maya, id: "ana", name: "Ana Diaz" };
+    const busy = [{ technicianId: "maya", slotStart: new Date("2026-10-26T15:00:00Z") }];
+    const slots = findSlots({ ...base, technicians: [maya, ana, luis], busy, now, preferredDate: "2026-10-26" });
+    expect(slots.map((s) => [s.start.toISOString(), s.technicianId])).toEqual([
+      ["2026-10-26T15:00:00.000Z", "ana"],
+      ["2026-10-26T17:00:00.000Z", "maya"],
+      ["2026-10-26T19:00:00.000Z", "maya"],
+    ]);
   });
 });
 

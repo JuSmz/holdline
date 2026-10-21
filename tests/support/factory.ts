@@ -36,11 +36,20 @@ export async function catalogOf(db: Db, workspaceId: string) {
 
 const HOUR = 3_600_000;
 
-/** A pending_payment booking for drain cleaning with Maya, `daysAhead` from `now` (default 2 days). */
+/**
+ * A pending_payment booking for drain cleaning with Maya, starting `daysAhead` days after `now` (default 2),
+ * on the hour, or at an explicit `slotStart`. Each test owns its workspace, so slots never collide across tests.
+ */
 export async function makeBooking(
   db: Db,
   workspaceId: string,
-  options: { now?: Date; daysAhead?: number; serviceKey?: string; status?: typeof bookings.$inferInsert.status } = {},
+  options: {
+    now?: Date;
+    daysAhead?: number;
+    slotStart?: Date;
+    serviceKey?: string;
+    status?: typeof bookings.$inferInsert.status;
+  } = {},
 ) {
   const now = options.now ?? new Date();
   const { service, tech } = await catalogOf(db, workspaceId);
@@ -50,10 +59,8 @@ export async function makeBooking(
     .insert(customers)
     .values({ workspaceId, name: "Test Caller", email: "buyer@personal.example.com", address: "12 Main St" })
     .returning();
-  // Unique per test run: a random minute offset keeps the live-slot index out of the way.
-  const start = new Date(
-    now.getTime() + (options.daysAhead ?? 2) * 24 * HOUR + Math.floor(Math.random() * 100_000) * 60_000,
-  );
+  const start =
+    options.slotStart ?? new Date(Math.ceil((now.getTime() + (options.daysAhead ?? 2) * 24 * HOUR) / HOUR) * HOUR);
   const [booking] = await db
     .insert(bookings)
     .values({

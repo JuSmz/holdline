@@ -57,10 +57,10 @@ describe("POST /api/paypal/webhook", () => {
 
     const first = await post(body, headers);
     expect(first.status).toBe(200);
-    expect(await first.json()).toEqual({ ok: true, duplicate: false });
+    expect(await first.json()).toMatchObject({ ok: true, duplicate: false });
 
     const second = await post(body, headers);
-    expect(await second.json()).toEqual({ ok: true, duplicate: true });
+    expect(await second.json()).toMatchObject({ ok: true, duplicate: true });
 
     const rows = await rowsFor(eventId);
     expect(rows).toHaveLength(1);

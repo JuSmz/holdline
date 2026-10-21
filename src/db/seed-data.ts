@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 
 import { readVar } from "@/server/config/env";
+import { newBookingRef } from "@/server/domain/refs";
 
 import {
   addonItems,
@@ -220,6 +221,24 @@ export async function seedSampleHistory(db: Executor, workspaceId: string, now: 
   const at = (daysAgo: number, hour: number) =>
     new Date(Math.floor(now.getTime() / DAY) * DAY - daysAgo * DAY + hour * 3_600_000);
   const tag = randomUUID().slice(0, 8);
+  // Refs are global (SPEC §10.4): draw real ones and retry on the rare collision.
+  const insertBooking = async (values: Omit<typeof bookings.$inferInsert, "ref">) => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        // A savepoint, so a collision inside a caller's transaction doesn't abort it.
+        return await db.transaction(async (sp) => {
+          const [row] = await sp
+            .insert(bookings)
+            .values({ ...values, ref: newBookingRef() })
+            .returning();
+          return row;
+        });
+      } catch (error) {
+        const code = (error as { cause?: { code?: string } }).cause?.code;
+        if (code !== "23505" || attempt >= 5) throw error;
+      }
+    }
+  };
 
   // 1. A paid-out drain cleaning.
   const [c1] = await db
@@ -246,29 +265,25 @@ export async function seedSampleHistory(db: Executor, workspaceId: string, now: 
       endedReason: "customer-ended-call",
     })
     .returning();
-  const [b1] = await db
-    .insert(bookings)
-    .values({
-      workspaceId,
-      ref: `HL-S${tag.slice(0, 4).toUpperCase()}`.slice(0, 8),
-      status: "paid_out",
-      serviceId: drain.id,
-      technicianId: maya.id,
-      customerId: c1.id,
-      callId: call1.id,
-      slotStart: at(5, 15),
-      slotEnd: at(5, 17),
-      serviceName: drain.name,
-      priceCents: drain.priceCents,
-      noShowFeeCents: drain.noShowFeeCents,
-      problemSummary: "Kitchen sink drains slowly, standing water.",
-      urgency: "soon",
-      holdExpiresAt: at(6, 16),
-      authorizedAt: at(6, 15.1),
-      sample: true,
-      statusChangedAt: at(5, 19),
-    })
-    .returning();
+  const b1 = await insertBooking({
+    workspaceId,
+    status: "paid_out",
+    serviceId: drain.id,
+    technicianId: maya.id,
+    customerId: c1.id,
+    callId: call1.id,
+    slotStart: at(5, 15),
+    slotEnd: at(5, 17),
+    serviceName: drain.name,
+    priceCents: drain.priceCents,
+    noShowFeeCents: drain.noShowFeeCents,
+    problemSummary: "Kitchen sink drains slowly, standing water.",
+    urgency: "soon",
+    holdExpiresAt: at(6, 16),
+    authorizedAt: at(6, 15.1),
+    sample: true,
+    statusChangedAt: at(5, 19),
+  });
   const [a1] = await db
     .insert(authorizations)
     .values({
@@ -333,29 +348,25 @@ export async function seedSampleHistory(db: Executor, workspaceId: string, now: 
       address: "Sample address, Austin TX",
     })
     .returning();
-  const [b2] = await db
-    .insert(bookings)
-    .values({
-      workspaceId,
-      ref: `HL-T${tag.slice(4, 8).toUpperCase()}`.slice(0, 8),
-      status: "voided",
-      serviceId: outlet.id,
-      technicianId: luis.id,
-      customerId: c2.id,
-      slotStart: at(2, 14),
-      slotEnd: at(2, 16),
-      serviceName: outlet.name,
-      priceCents: outlet.priceCents,
-      noShowFeeCents: outlet.noShowFeeCents,
-      problemSummary: "Bathroom outlet stopped working.",
-      urgency: "flexible",
-      holdExpiresAt: at(4, 11),
-      authorizedAt: at(4, 10.2),
-      cancelReason: "owner",
-      sample: true,
-      statusChangedAt: at(3, 9),
-    })
-    .returning();
+  const b2 = await insertBooking({
+    workspaceId,
+    status: "voided",
+    serviceId: outlet.id,
+    technicianId: luis.id,
+    customerId: c2.id,
+    slotStart: at(2, 14),
+    slotEnd: at(2, 16),
+    serviceName: outlet.name,
+    priceCents: outlet.priceCents,
+    noShowFeeCents: outlet.noShowFeeCents,
+    problemSummary: "Bathroom outlet stopped working.",
+    urgency: "flexible",
+    holdExpiresAt: at(4, 11),
+    authorizedAt: at(4, 10.2),
+    cancelReason: "owner",
+    sample: true,
+    statusChangedAt: at(3, 9),
+  });
   await db.insert(authorizations).values({
     bookingId: b2.id,
     paypalAuthorizationId: `SAMPLE-AUTH-${tag}-2`,

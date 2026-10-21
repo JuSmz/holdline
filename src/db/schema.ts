@@ -117,7 +117,7 @@ export const calls = pgTable(
       .default(sql`uuidv7()`),
     workspaceId: uuid("workspace_id")
       .notNull()
-      .references(() => workspaces.id),
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     channel: callChannel("channel").notNull(),
     vapiCallId: text("vapi_call_id").unique(),
     vapiCallType: text("vapi_call_type"),
@@ -301,7 +301,7 @@ export const bookings = pgTable(
       .notNull()
       .references(() => technicians.id),
     customerId: uuid("customer_id").references(() => customers.id),
-    callId: uuid("call_id").references(() => calls.id),
+    callId: uuid("call_id").references(() => calls.id, { onDelete: "set null" }),
     slotStart: timestamp("slot_start", { withTimezone: true }).notNull(),
     slotEnd: timestamp("slot_end", { withTimezone: true }).notNull(),
     // Price snapshot (SPEC §9.1): every amount is derived from these, never from the live catalog.

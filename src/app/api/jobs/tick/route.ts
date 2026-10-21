@@ -1,13 +1,16 @@
 import { getDb } from "@/db/client";
 import { readSecret } from "@/server/config/env";
 import { recordTick } from "@/server/meta";
+import { defaultContext, type PaymentContext } from "@/server/payments/context";
+import { runTick } from "@/server/payments/jobs";
+import { PayPalNotConfiguredError } from "@/server/paypal";
 import { bearerMatches } from "@/server/security/compare";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Called every 5 minutes by the Render cron job over the private network.
- * Stage 1: only records the heartbeat. The jobs from SPEC §12 are added in stage 6.
+ * Called every 5 minutes by the Render cron job over the private network. Runs the jobs from SPEC §12
+ * in order, then records the heartbeat. Without PayPal credentials only the PayPal-free jobs run.
  */
 export async function POST(request: Request) {
   const secret = readSecret(process.env, "CRON_SECRET");
@@ -18,6 +21,13 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
+  let ctx: PaymentContext | null = null;
+  try {
+    ctx = defaultContext();
+  } catch (error) {
+    if (!(error instanceof PayPalNotConfiguredError)) throw error;
+  }
+  const report = await runTick(ctx, getDb());
   const at = await recordTick(getDb());
-  return Response.json({ ok: true, at: at.toISOString() }, { headers: { "Cache-Control": "no-store" } });
+  return Response.json({ ok: true, at: at.toISOString(), report }, { headers: { "Cache-Control": "no-store" } });
 }
