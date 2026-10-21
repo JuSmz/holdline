@@ -210,10 +210,13 @@ export async function captureBooking(
     }
     throw error;
   }
-  // PayPal answered, but the money didn't move: an owner retry may try again under a new key.
-  if (info.status === "DECLINED" || info.status === "FAILED")
+  const outcome = await applyCapture(ctx, bookingId, kind, auth, info);
+  // PayPal answered, but the money didn't move: once capture_failed is committed, an owner retry may run
+  // under a new key. (A crash in between is repaired by the reconciler, which does the same.)
+  if (info.status === "DECLINED" || info.status === "FAILED") {
     await markOperationFailed(db, retry.key, `capture ${info.status}`);
-  return applyCapture(ctx, bookingId, kind, auth, info);
+  }
+  return outcome;
 }
 
 /** Finds our capture on PayPal (GET order → payments.captures) by its invoice_id. */

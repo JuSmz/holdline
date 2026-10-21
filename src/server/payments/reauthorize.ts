@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
-import { authorizations, bookings } from "@/db/schema";
+import { authorizations, bookings, captures, paymentOperations } from "@/db/schema";
 import { honorUntil } from "@/server/domain/reauth";
 import { lockBooking, logBookingEvent, setPaymentIssue } from "@/server/domain/transition";
 import { payPalToCents } from "@/server/money";
@@ -19,14 +19,47 @@ export type ReauthOutcome = "reauthorized" | "failed" | "processing" | "skipped"
  * `<instance>:reauth:<authId>`. The child becomes active for capture; voids still go to the parent.
  * One reauthorization per chain. A failure sets `reauth_failed` and the owner offers re-approval.
  */
-export async function reauthorizeBooking(ctx: PaymentContext, bookingId: string): Promise<ReauthOutcome> {
+export async function reauthorizeBooking(
+  ctx: PaymentContext,
+  bookingId: string,
+  /** resume: the reconciler finishes an in-flight reauthorization even if the booking moved on meanwhile. */
+  options: { resume?: boolean } = {},
+): Promise<ReauthOutcome> {
   const { db, paypal } = ctx;
   const b = await getBooking(db, bookingId);
   assertLive(b);
-  if (b.status !== "authorized" || b.paymentIssue) return "skipped";
-  const parent = await activeAuthorization(db, b);
-  if (parent.parentAuthorizationId) return "skipped"; // already the child of a chain
-  if (!parent.reauthorizeAt || parent.reauthorizeAt > ctx.now()) return "skipped";
+  if (!options.resume && (b.status !== "authorized" || b.paymentIssue)) return "skipped";
+  if (!b.activeAuthorizationId) return "skipped";
+  const active = await activeAuthorization(db, b);
+  if (active.parentAuthorizationId) {
+    // Already linked (possibly by the child's own webhook): settle a reauth row still left in flight.
+    const [root] = await db.select().from(authorizations).where(eq(authorizations.id, active.parentAuthorizationId));
+    if (root) {
+      await db
+        .update(paymentOperations)
+        .set({
+          state: "succeeded",
+          result: {
+            paypalAuthorizationId: active.paypalAuthorizationId,
+            status: active.status,
+            amountCents: active.amountCents,
+            createTime: null,
+            expirationTime: null,
+          },
+          appliedAt: ctx.now(),
+          updatedAt: ctx.now(),
+        })
+        .where(
+          and(
+            eq(paymentOperations.key, `reauth:${root.paypalAuthorizationId}`),
+            eq(paymentOperations.state, "in_flight"),
+          ),
+        );
+    }
+    return "skipped";
+  }
+  const parent = active;
+  if (!options.resume && (!parent.reauthorizeAt || parent.reauthorizeAt > ctx.now())) return "skipped";
 
   const requestId = paypal.requestId("reauth", parent.paypalAuthorizationId);
   let child: {
@@ -115,12 +148,20 @@ export async function linkReauthorizedChild(
   const [row] = await tx
     .insert(authorizations)
     .values(values)
+    // An existing row keeps its own status and role (it may be captured or voided by now); only the link is set.
     .onConflictDoUpdate({
       target: authorizations.paypalAuthorizationId,
-      set: { parentAuthorizationId: input.parent.id, role: "active", status: input.child.status, updatedAt: input.now },
+      set: { parentAuthorizationId: input.parent.id, updatedAt: input.now },
     })
     .returning();
-  if (locked.status === "authorized" && locked.activeAuthorizationId === input.parent.id) {
+  // Switch the capture target while the parent is still it and no money was captured (a Job done may
+  // have raced the reauthorization; its retry must go to the child).
+  const [captured] = await tx
+    .select({ id: captures.id })
+    .from(captures)
+    .where(and(eq(captures.bookingId, input.bookingId), inArray(captures.status, ["COMPLETED", "PENDING"])));
+  const switchable = ["authorized", "completed", "no_show", "cancelled"].includes(locked.status);
+  if (switchable && !captured && locked.activeAuthorizationId === input.parent.id) {
     await tx
       .update(bookings)
       .set({ activeAuthorizationId: row.id, updatedAt: input.now })

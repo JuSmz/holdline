@@ -338,6 +338,16 @@ export async function applyAuthorization(
 
     if (info.status === "DENIED") {
       await tx.update(bookings).set({ authorizingUntil: null, updatedAt: now }).where(eq(bookings.id, bookingId));
+      // A review that ends in DENIED lets the payer try again right away.
+      if (b.status === "pending_payment") {
+        await setPaymentIssue(tx, {
+          bookingId,
+          flag: null,
+          clearOnly: "authorization_pending",
+          actor,
+          reason: "authorization_denied",
+        });
+      }
       return { kind: "declined" as const, booking: b };
     }
 
@@ -363,7 +373,19 @@ export async function applyAuthorization(
       return { kind: "pending" as const, booking: flagged.booking };
     }
 
-    if (info.status !== "CREATED") return { kind: "other" as const, booking: b };
+    if (info.status !== "CREATED") {
+      // VOIDED or expired while under review: nothing holds the slot any more; let the payer retry.
+      if (b.status === "pending_payment") {
+        await setPaymentIssue(tx, {
+          bookingId,
+          flag: null,
+          clearOnly: "authorization_pending",
+          actor,
+          reason: `authorization_${info.status.toLowerCase()}`,
+        });
+      }
+      return { kind: "other" as const, booking: b };
+    }
 
     if (b.activeAuthorizationId === stored.id) return { kind: "authorized" as const, booking: b, fresh: false };
 

@@ -155,8 +155,11 @@ export async function syncPayout(ctx: PaymentContext, payoutId: string): Promise
         updatedAt: ctx.now(),
       })
       .where(eq(payouts.id, payoutId));
-  } else if (item && !row.paypalItemId) {
-    await db.update(payouts).set({ paypalItemId: item.payout_item_id }).where(eq(payouts.id, payoutId));
+  } else {
+    await db
+      .update(payouts)
+      .set({ paypalItemId: row.paypalItemId ?? item?.payout_item_id ?? null, updatedAt: ctx.now() })
+      .where(eq(payouts.id, payoutId));
   }
   if (next === "failed" || next === "unclaimed" || next === "needs_review") await flagPayoutFailed(ctx, row.bookingId);
   if (next === "succeeded") await maybePaidOut(ctx, row.bookingId);
@@ -350,6 +353,8 @@ export async function processingPayoutIds(db: Executor, limit: number): Promise<
     .select({ id: payouts.id })
     .from(payouts)
     .where(and(inArray(payouts.status, ["processing", "cancelling", "unclaimed"]), eq(payouts.sample, false)))
+    // Oldest sync first; every sync bumps updated_at, so long-lived UNCLAIMED rows can't starve the rest.
+    .orderBy(payouts.updatedAt)
     .limit(limit);
   return rows.map((r) => r.id);
 }

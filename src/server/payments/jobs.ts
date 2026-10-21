@@ -34,6 +34,7 @@ import {
   DefiniteOperationError,
   hasOperationInFlight,
   markApplied,
+  markOperationFailed,
   type OperationRow,
   runOperation,
   unappliedOperations,
@@ -204,7 +205,7 @@ export async function resumeOperation(ctx: PaymentContext, op: OperationRow): Pr
       return;
     }
     case "reauth": {
-      if (op.bookingId) await reauthorizeBooking(ctx, op.bookingId);
+      if (op.bookingId) await reauthorizeBooking(ctx, op.bookingId, { resume: true });
       return;
     }
     case "payout":
@@ -529,6 +530,11 @@ export async function reapplyOperation(ctx: PaymentContext, op: OperationRow): P
         if (authId)
           await applyCapture(ctx, op.bookingId, parts[1] as CaptureKind, await getAuthorization(db, authId), info);
       }
+      // A declined or failed capture frees its key for an owner retry once the flag is in place.
+      if (info.status === "DECLINED" || info.status === "FAILED") {
+        await markOperationFailed(db, op.key, `capture ${info.status}`);
+        return;
+      }
       break;
     }
     case "void": {
@@ -554,7 +560,13 @@ export async function reapplyOperation(ctx: PaymentContext, op: OperationRow): P
         expirationTime: string | null;
       } | null;
       const [parent] = await db.select().from(authorizations).where(eq(authorizations.paypalAuthorizationId, parts[1]));
-      if (child && parent && child.status === "CREATED") {
+      const [linked] = child
+        ? await db
+            .select()
+            .from(authorizations)
+            .where(eq(authorizations.paypalAuthorizationId, child.paypalAuthorizationId))
+        : [];
+      if (child && parent && child.status === "CREATED" && linked?.parentAuthorizationId !== parent.id) {
         await db.transaction((tx) =>
           linkReauthorizedChild(tx, {
             bookingId: parent.bookingId,

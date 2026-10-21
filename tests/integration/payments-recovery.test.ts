@@ -314,6 +314,97 @@ describe("refund events", () => {
   });
 });
 
+describe("second-round fixes", () => {
+  it("a DECLINED capture whose flag was never written is repaired, and Retry capture works", async () => {
+    const h = paymentHarness();
+    const { booking } = await authorizedBooking(h);
+    const auth = await authRow(booking.id);
+    await db().transaction((tx) =>
+      transitionBooking(tx, { bookingId: booking.id, from: "authorized", to: "completed", actor: "owner" }),
+    );
+    h.fake.next.captureStatus.push("DECLINED");
+    const requestId = h.paypal.requestId("capture", "full", booking.id);
+    await runOperation(db(), {
+      key: `capture:full:${booking.id}`,
+      kind: "capture",
+      bookingId: booking.id,
+      requestId,
+      now: h.ctx.now,
+      run: async () => {
+        const c = await captureAuthorization(h.paypal, auth.paypalAuthorizationId, {
+          requestId,
+          amountCents: booking.priceCents,
+          currency: "USD",
+          finalCapture: true,
+          invoiceId: `t-pay-${booking.ref}`,
+        });
+        return {
+          paypalCaptureId: c.id,
+          status: c.status,
+          amountCents: 14_900,
+          finalCapture: true,
+          authorizationId: auth.id,
+        };
+      },
+    });
+    h.advance(MINUTE);
+    await runTick(h.ctx, db(), h.now());
+    expect(await bookingById(db(), booking.id)).toMatchObject({ status: "completed", paymentIssue: "capture_failed" });
+    expect((await retryCapture(h.ctx, booking.id)).status).toBe("captured");
+  });
+
+  it("Waive fee and Bill via invoice clicked together never leave a waived fee invoiced", async () => {
+    for (let round = 0; round < 3; round += 1) {
+      await resetPayments();
+      const h = paymentHarness();
+      const { booking } = await authorizedBooking(h);
+      h.fake.next.captureStatus.push("DECLINED");
+      await markNoShow(h.ctx, booking.id);
+      await Promise.allSettled([waiveFee(h.ctx, booking.id), billViaInvoice(h.ctx, booking.id)]);
+      const b = await bookingById(db(), booking.id);
+      const sent = [...h.fake.invoices.values()].filter((i) => i.status === "SENT");
+      expect(b.status === "voided" && sent.length > 0).toBe(false);
+    }
+  });
+
+  it("a PENDING hold that settles DENIED lets the payer retry at once", async () => {
+    const h = paymentHarness();
+    const { booking } = await pendingBooking(h);
+    h.fake.next.authorizationStatus.push("PENDING");
+    const { orderId } = await createOrderForBooking(h.ctx, booking.id);
+    h.fake.approve(orderId);
+    await authorizeBooking(h.ctx, booking.id, orderId);
+    h.fake.settleAuthorization((await authRow(booking.id)).paypalAuthorizationId, "DENIED");
+    await runTick(h.ctx, db(), h.now());
+    expect(await bookingById(db(), booking.id)).toMatchObject({ status: "pending_payment", paymentIssue: null });
+    const next = await createOrderForBooking(h.ctx, booking.id);
+    expect(next.orderId).not.toBe(orderId);
+  });
+
+  it("a Job done that races a reauthorization retries its capture on the child", async () => {
+    const h = paymentHarness();
+    const { booking } = await authorizedBooking(h, { daysAhead: 10 });
+    const parent = await authRow(booking.id);
+    h.fake.fault("POST", /\/reauthorize$/, { kind: "lostResponse" }, 3);
+    h.set(new Date(parent.reauthorizeAt!.getTime() + MINUTE));
+    await runTick(h.ctx, db(), h.now());
+    // The parent can't be captured once PayPal reauthorized it: Job done ends in capture_failed.
+    expect((await markJobDone(h.ctx, booking.id)).status).toBe("capture_failed");
+    const child = [...h.fake.authorizations.values()].find((a) => a.parentId === parent.paypalAuthorizationId)!;
+    await processWebhookEvent(h.ctx, await storeEvent("PAYMENT.AUTHORIZATION.CREATED", { id: child.id }, child.id));
+    expect((await retryCapture(h.ctx, booking.id)).status).toBe("captured");
+    expect(h.fake.calls("POST", /\/capture$/).at(-1)!.path).toContain(child.id);
+    // The reauthorization row settles instead of being abandoned.
+    h.advance(2 * MINUTE);
+    await runTick(h.ctx, db(), h.now());
+    const [op] = await db()
+      .select()
+      .from(paymentOperations)
+      .where(eq(paymentOperations.key, `reauth:${parent.paypalAuthorizationId}`));
+    expect(op.state).toBe("succeeded");
+  });
+});
+
 describe("liveness", () => {
   it("stuck operations back off and never starve a real recovery", async () => {
     const h = paymentHarness();

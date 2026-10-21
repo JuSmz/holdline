@@ -2,7 +2,7 @@
 
 What we actually observed against the PayPal **sandbox**. It answers the open risks R1–R3 and R10 from SPEC §27 and holds no secrets. Every row links to a `paypal_api_log` entry or a lab result by its PayPal ID and `debug_id`.
 
-> Status: **stages 2 and 3 complete** (2026-10-21, https://holdline-web.onrender.com). Open: the reauthorization check on or after 2026-10-26 (stage 6).
+> Status: **stages 2 and 3 complete** (2026-10-21, https://holdline-web.onrender.com). Open: the reauthorization check on or after 2026-10-26 (stage 6, table at the end).
 
 ## Setup
 
@@ -61,9 +61,14 @@ Observations:
 
 ## Reauthorization check (on or after 2026-10-26, stage 6)
 
-| Check                                          | Expected                                               | Observed |
-| ---------------------------------------------- | ------------------------------------------------------ | -------- |
-| Reauthorize an authorization older than 3 days | New child authorization ID, its own 3-day honor period |          |
-| Capture on the child ID                        | `COMPLETED`                                            |          |
-| Void the child                                 | 422 `CANNOT_BE_VOIDED`                                 |          |
-| Void another parent                            | `VOIDED`                                               |          |
+Run in `/lab/paypal` → "Act on an authorization" with the three holds left open on 2026-10-21. It confirms or corrects the reauthorization model the fake PayPal uses (SPEC §12, stage-6 status).
+
+| #   | Step                                                                | Fake PayPal assumes                                  | Observed |
+| --- | ------------------------------------------------------------------- | ---------------------------------------------------- | -------- |
+| R1  | Reauthorize `4GX89483F7042474H`                                     | new child ID, `CREATED`, own honor period            |          |
+| R2  | Void the child from R1                                              | 422 `CANNOT_BE_VOIDED`                               |          |
+| R3  | Capture $25 on the child from R1 (final)                            | `COMPLETED`; GET parent afterwards → `CAPTURED`      |          |
+| R4  | Reauthorize `7K774756FF368904W`, then capture on the **parent**     | 422 (the parent can't be captured once reauthorized) |          |
+| R5  | Void the parent `7K774756FF368904W`, then GET its child             | parent `VOIDED`; child `VOIDED` too                  |          |
+| R6  | Void `5A6579550V625045H` (never reauthorized)                       | `VOIDED`                                             |          |
+| R7  | Reauthorize the child from R1 again (one reauthorization per chain) | 422                                                  |          |

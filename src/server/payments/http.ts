@@ -5,7 +5,7 @@ import { dbErrorCode } from "@/server/db-error";
 import { PayPalApiError } from "@/server/paypal/errors";
 
 import { PaymentStateError } from "./context";
-import { OperationFailedError, OperationInProgressError } from "./ledger";
+import { DefiniteOperationError, OperationFailedError, OperationInProgressError } from "./ledger";
 
 /**
  * Maps payment and booking errors to JSON responses for route handlers. Business refusals keep their
@@ -21,6 +21,7 @@ export function paymentErrorResponse(error: unknown): Response {
   if (error instanceof InvoiceInputError) return json(400, "invalid_items", error.message);
   if (error instanceof OperationInProgressError) return json(202, "in_progress", error.message);
   if (error instanceof OperationFailedError) return json(409, "failed", error.message);
+  if (error instanceof DefiniteOperationError) return json(409, "refused", error.message);
   if (error instanceof PayPalApiError) {
     return json(502, "paypal_error", `PayPal: ${error.issue ?? error.errorName ?? error.status}`);
   }

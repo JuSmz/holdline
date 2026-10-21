@@ -10,6 +10,7 @@ import { voidAuthorization } from "@/server/paypal/payments";
 import { captureBooking, type MoneyOutcome } from "./capture";
 import { type PaymentContext, PaymentStateError } from "./context";
 import {
+  claimOperation,
   DefiniteOperationError,
   hasOperationInFlight,
   OperationInProgressError,
@@ -28,6 +29,8 @@ export async function voidHold(
   from: "cancelled" | "no_show",
   reason: string,
   actor: Actor = "system",
+  /** A void key the caller already claimed under the booking lock (Waive fee). */
+  claimed?: { key: string; n: number },
 ): Promise<MoneyOutcome> {
   const { db, paypal } = ctx;
   const b = await getBooking(db, bookingId);
@@ -37,7 +40,7 @@ export async function voidHold(
   const auth = await activeAuthorization(db, b);
   const root = await chainRoot(db, auth);
   // After a definite failure an owner re-click (Cancel, Waive) retries under a new key.
-  const attempt = await resumableKey(db, `void:${bookingId}`);
+  const attempt = claimed ?? (await resumableKey(db, `void:${bookingId}`));
   const requestId = paypal.requestId("void", bookingId, ...(attempt.n ? [`r${attempt.n}`] : []));
 
   try {
@@ -47,6 +50,7 @@ export async function voidHold(
       bookingId,
       requestId,
       now: ctx.now,
+      preclaimed: Boolean(claimed),
       run: async () => {
         try {
           await voidAuthorization(paypal, root.paypalAuthorizationId, { requestId });
@@ -77,36 +81,59 @@ export async function voidHold(
 
 /** Waive fee (SPEC §9.4.5): no_show → voided; also clears a failed late fee (cancelled → voided). */
 export async function waiveFee(ctx: PaymentContext, bookingId: string): Promise<MoneyOutcome> {
-  const { db } = ctx;
-  const b = await getBooking(db, bookingId);
-  assertLive(b);
-  const from = b.status === "no_show" ? "no_show" : b.status === "cancelled" ? "cancelled" : null;
-  if (!from) {
-    if (b.status === "voided") return { status: "voided", booking: b };
-    throw new PaymentStateError("There is no fee to waive.");
-  }
-  if (await hasOperationInFlight(db, bookingId, "capture:")) {
-    throw new PaymentStateError("A fee capture is still in progress.", 409, "in_progress");
-  }
-  const [openInvoice] = await db
-    .select({ id: invoices.id })
-    .from(invoices)
-    .where(
-      and(
-        eq(invoices.bookingId, bookingId),
-        eq(invoices.kind, "fallback"),
-        inArray(invoices.status, ["draft", "sent"]),
-      ),
-    );
-  if (openInvoice) {
-    throw new PaymentStateError("A fallback invoice is open; cancel it before waiving the fee.", 409, "invoice_open");
-  }
-  const [captured] = await db
-    .select({ id: captures.id })
-    .from(captures)
-    .where(and(eq(captures.bookingId, bookingId), inArray(captures.status, ["COMPLETED", "PENDING"])));
-  if (captured) throw new PaymentStateError("The fee was already captured.");
-  return voidHold(ctx, bookingId, from, "fee_waived", "owner");
+  const { db, paypal } = ctx;
+  // Checks and the void claim under the booking lock: Bill via invoice takes the same lock and refuses
+  // once this void is claimed; we refuse while its fallback invoice is open.
+  const decision = await db.transaction(async (tx) => {
+    const b = await lockBooking(tx, bookingId);
+    assertLive(b);
+    const from: "no_show" | "cancelled" | null =
+      b.status === "no_show" ? "no_show" : b.status === "cancelled" ? "cancelled" : null;
+    if (!from) {
+      if (b.status === "voided") return { done: true as const, booking: b };
+      throw new PaymentStateError("There is no fee to waive.");
+    }
+    if (await hasOperationInFlight(tx, bookingId, "capture:")) {
+      throw new PaymentStateError("A fee capture is still in progress.", 409, "in_progress");
+    }
+    const [openInvoice] = await tx
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.bookingId, bookingId),
+          eq(invoices.kind, "fallback"),
+          inArray(invoices.status, ["draft", "sent"]),
+        ),
+      );
+    if (openInvoice) {
+      throw new PaymentStateError("A fallback invoice is open; cancel it before waiving the fee.", 409, "invoice_open");
+    }
+    const [captured] = await tx
+      .select({ id: captures.id })
+      .from(captures)
+      .where(and(eq(captures.bookingId, bookingId), inArray(captures.status, ["COMPLETED", "PENDING"])));
+    if (captured) throw new PaymentStateError("The fee was already captured.");
+    const attempt = await resumableKey(tx, `void:${bookingId}`);
+    const claimed = await claimOperation(tx, {
+      key: attempt.key,
+      kind: "void",
+      bookingId,
+      requestId: paypal.requestId("void", bookingId, ...(attempt.n ? [`r${attempt.n}`] : [])),
+      now: ctx.now(),
+    });
+    return { done: false as const, from, attempt, claimed };
+  });
+  if (decision.done) return { status: "voided", booking: decision.booking };
+  // Only a key we just claimed runs directly; an existing attempt is waited for or replayed.
+  return voidHold(
+    ctx,
+    bookingId,
+    decision.from,
+    "fee_waived",
+    "owner",
+    decision.claimed ? decision.attempt : undefined,
+  );
 }
 
 export type CancelOutcome = MoneyOutcome & { rule: "withdrawn" | "free_void" | "late_fee"; amountCents: number };

@@ -1,6 +1,6 @@
-import { and, eq, gt, inArray, max } from "drizzle-orm";
+import { and, eq, gt, inArray, like, max, or } from "drizzle-orm";
 
-import { addonItems, authorizations, captures, customers, invoices } from "@/db/schema";
+import { addonItems, authorizations, captures, customers, invoices, paymentOperations } from "@/db/schema";
 import { readVar } from "@/server/config/env";
 import { type AddonPick, extraWorkLines } from "@/server/domain/pricing";
 import { lockBooking, logBookingEvent, setPaymentIssue, transitionBooking } from "@/server/domain/transition";
@@ -108,6 +108,19 @@ export async function billViaInvoice(ctx: PaymentContext, bookingId: string): Pr
     if (await hasOperationInFlight(tx, bookingId, "capture:")) {
       throw new PaymentStateError("A capture is still in progress.", 409, "in_progress");
     }
+    // A Waive or Cancel already releasing (or released) the hold: the fee is not to be billed.
+    const [releasing] = await tx
+      .select({ key: paymentOperations.key })
+      .from(paymentOperations)
+      .where(
+        and(
+          eq(paymentOperations.bookingId, bookingId),
+          inArray(paymentOperations.state, ["in_flight", "succeeded"]),
+          or(eq(paymentOperations.key, `void:${bookingId}`), like(paymentOperations.key, `void:${bookingId}:retry-%`)),
+        ),
+      );
+    if (releasing)
+      throw new PaymentStateError("The hold is being released; there is nothing to bill.", 409, "releasing");
     const [taken] = await tx
       .select({ id: captures.id })
       .from(captures)
@@ -174,6 +187,13 @@ export async function billViaInvoice(ctx: PaymentContext, bookingId: string): Pr
         .update(invoices)
         .set({ status: "cancelled", updatedAt: ctx.now() })
         .where(and(eq(invoices.invoiceNumber, invoiceNumber), eq(invoices.status, "draft")));
+    }
+    if (error instanceof DefiniteOperationError) {
+      throw new PaymentStateError(
+        "PayPal already captured money on this hold; nothing was invoiced.",
+        409,
+        "already_captured",
+      );
     }
     throw error;
   });
