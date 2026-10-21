@@ -6,3 +6,8 @@ allowBuilds:
 
 # Supply-chain guard: don't install versions younger than 3 days (minutes).
 minimumReleaseAge: 4320
+
+# drizzle-kit's deprecated @esbuild-kit loader pins esbuild 0.18 (GHSA-67mh-4wv8-2f99, dev server only).
+# Lift it to the esbuild drizzle-kit itself already uses.
+overrides:
+  "@esbuild-kit/core-utils>esbuild": 0.25.12
