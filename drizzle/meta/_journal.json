@@ -22,6 +22,20 @@
       "when": 1792605624232,
       "tag": "0002_calls_vapi_events",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792619783686,
+      "tag": "0003_domain_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792619789365,
+      "tag": "0004_status_guards",
+      "breakpoints": true
     }
   ]
 }
