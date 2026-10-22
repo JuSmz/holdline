@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST as notify } from "@/app/api/lab/voice/notify/route";
-import { POST as proxy } from "@/app/api/vapi-proxy/call/web/route";
+import { POST as proxy } from "@/app/api/vapi-proxy/lab/call/web/route";
 import { POST as events } from "@/app/api/vapi/events/route";
 import { POST as tools } from "@/app/api/vapi/tools/route";
 import { closeDb, getDb } from "@/db/client";
@@ -104,8 +104,11 @@ describe("POST /api/vapi/tools", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { results: { toolCallId: string; result?: string; error?: string }[] };
     expect(body.results.map((r) => r.toolCallId)).toEqual(["tc-1", "tc-2"]);
-    const services = JSON.parse(body.results[0].result ?? "{}") as { services: { service_id: string }[] };
-    expect(services.services.map((s) => s.service_id)).toEqual(["lab-drain", "lab-diagnostic"]);
+    // The workspace's own catalog from the database, prices as "$149.00" (SPEC §13.2).
+    const result = JSON.parse(body.results[0].result ?? "{}") as { services: { name: string; price: string }[] };
+    expect(result.services.length).toBeGreaterThan(0);
+    expect(result.services.every((s) => /^\$\d+\.\d{2}$/.test(s.price))).toBe(true);
+    expect(result.services.map((s) => s.name)).not.toContain("Outlet or switch repair");
     expect(body.results[1]).toMatchObject({ error: "unknown_tool" });
 
     const stored = await eventsFor(vapiCallId);
@@ -187,9 +190,9 @@ describe("POST /api/vapi/events", () => {
   });
 });
 
-describe("POST /api/vapi-proxy/call/web", () => {
+describe("POST /api/vapi-proxy/lab/call/web (owner lab)", () => {
   const proxyRequest = () =>
-    new Request("http://localhost:3000/api/vapi-proxy/call/web", {
+    new Request("http://localhost:3000/api/vapi-proxy/lab/call/web", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer proxy", origin: "http://localhost:3000" },
       body: JSON.stringify({ assistantId: "attacker-assistant", assistant: { model: { model: "expensive" } } }),

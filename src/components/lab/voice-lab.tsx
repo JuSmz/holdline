@@ -123,7 +123,7 @@ export function VoiceLab({ ready }: { ready: boolean }) {
       const { default: VapiClient } = await import("@vapi-ai/web");
       if (stale()) return;
       // The base URL points at our proxy; "proxy" is a placeholder token the proxy ignores (SPEC §14.3).
-      vapi = new VapiClient("proxy", `${window.location.origin}/api/vapi-proxy`);
+      vapi = new VapiClient("proxy", `${window.location.origin}/api/vapi-proxy/lab`);
       vapiRef.current = vapi;
 
       vapi.on("call-start", () => {

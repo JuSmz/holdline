@@ -88,8 +88,8 @@ export async function applyCallStatus(vapiCallId: string, status: string, contro
 }
 
 /** Stores the end-of-call report. A repeated report overwrites with the same data. */
-export async function applyCallReport(vapiCallId: string, report: CallReport): Promise<void> {
-  await getDb()
+export async function applyCallReport(vapiCallId: string, report: CallReport): Promise<CallBinding | undefined> {
+  const [row] = await getDb()
     .update(calls)
     .set({
       status: "ended",
@@ -104,7 +104,9 @@ export async function applyCallReport(vapiCallId: string, report: CallReport): P
       llmModel: report.llmModel ?? undefined,
       updatedAt: new Date(),
     })
-    .where(eq(calls.vapiCallId, vapiCallId));
+    .where(eq(calls.vapiCallId, vapiCallId))
+    .returning();
+  return row;
 }
 
 /** Lab calls only: the notify route never acts on a call the lab didn't start. */

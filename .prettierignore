@@ -4,3 +4,5 @@ pnpm-lock.yaml
 drizzle/meta/
 node_modules/
 AGENTS.md
+playwright-report/
+test-results/

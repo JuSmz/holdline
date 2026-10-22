@@ -23,3 +23,8 @@ export function payPalToCents(value: string): number {
 export function formatUsd(cents: number): string {
   return `$${centsToPayPal(cents)}`;
 }
+
+/** "$149" for whole dollars, "$149.50" otherwise: how amounts are spoken (SPEC §16). */
+export function spokenUsd(cents: number): string {
+  return cents % 100 === 0 ? `$${cents / 100}` : formatUsd(cents);
+}

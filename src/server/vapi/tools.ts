@@ -1,60 +1,22 @@
+import { agentCallOf, agentContext, runAgentTool, type AgentContext } from "@/server/agent/handlers";
+import { isToolName } from "@/server/agent/tools";
+import { dbErrorCode } from "@/server/db-error";
+
 import { sendControl } from "./control";
-import { findCallBinding, recordVapiEvent } from "./calls";
+import { type CallBinding, findCallBinding, recordVapiEvent } from "./calls";
 import { toolCallsOf, type ToolCall, type ToolResult, type VapiServerMessage } from "./messages";
 
-/**
- * Stage-4 spike catalog for the one dummy tool. Fixed on the server like the PayPal lab amounts
- * (SPEC §9.1); stage 8 replaces it with the workspace's services from the database.
- */
-const LAB_CATALOG = [
-  {
-    category: "plumbing",
-    service: {
-      service_id: "lab-drain",
-      name: "Drain cleaning",
-      description: "Clear one blocked sink, shower or floor drain.",
-      price: "$149.00",
-      duration_min: 90,
-      no_show_fee: "$49.00",
-    },
-  },
-  {
-    category: "electrical",
-    service: {
-      service_id: "lab-outlet",
-      name: "Outlet or switch repair",
-      description: "Diagnose and repair one faulty outlet or switch.",
-      price: "$129.00",
-      duration_min: 60,
-      no_show_fee: "$39.00",
-    },
-  },
-  {
-    category: "any",
-    service: {
-      service_id: "lab-diagnostic",
-      name: "Diagnostic visit",
-      description: "A technician finds the cause and quotes the fix on site.",
-      price: "$89.00",
-      duration_min: 60,
-      no_show_fee: "$29.00",
-    },
-  },
-] as const;
-
-function runTool(call: ToolCall): ToolResult {
+/** One Vapi tool call through the shared agent handlers; Vapi wants the result as a string (SPEC §14.5). */
+async function runTool(ctx: AgentContext, binding: CallBinding, call: ToolCall): Promise<ToolResult> {
   const base = { toolCallId: call.id, name: call.name };
   if (call.args === null) return { ...base, error: "invalid_arguments" };
-  switch (call.name) {
-    case "get_services": {
-      const category = call.args.category;
-      const services = LAB_CATALOG.filter(
-        (entry) => entry.category === "any" || category === undefined || entry.category === category,
-      ).map((entry) => entry.service);
-      return { ...base, result: JSON.stringify({ services }) };
-    }
-    default:
-      return { ...base, error: "unknown_tool" };
+  if (!isToolName(call.name)) return { ...base, error: "unknown_tool" };
+  try {
+    const result = await runAgentTool(ctx, agentCallOf(binding), { id: call.id, name: call.name, args: call.args });
+    return { ...base, result: JSON.stringify(result) };
+  } catch (error) {
+    console.error(`[holdline] tool ${call.name} failed on call ${binding.id}: ${dbErrorCode(error)}`);
+    return { ...base, error: "server_error" };
   }
 }
 
@@ -73,7 +35,10 @@ export async function answerToolCalls(
     results = toolCalls.map((c) => ({ toolCallId: c.id, name: c.name, error: "call_not_bound" }));
     await endUnboundCall(message, "tool-calls");
   } else {
-    results = toolCalls.map(runTool);
+    const ctx = agentContext();
+    results = [];
+    // Sequential on purpose: two booking calls of one conversation must not race (SPEC §13.3).
+    for (const call of toolCalls) results.push(await runTool(ctx, binding, call));
   }
   await recordVapiEvent({
     endpoint,

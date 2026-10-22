@@ -722,7 +722,7 @@ The real-sandbox reauthorization check runs on or after **10-26**, using authori
   - If the caller asks for a discount: "Our prices are fixed; the hold is only charged after the job."
   - If the job isn't in the list, offer a diagnostic visit.
 - **Slots:** offer only slots returned by `check_availability`.
-- **One booking per call.** If the caller changes the service or the slot, call `create_booking_with_payment_link` again: the server replaces the pending booking. Don't create bookings in parallel.
+- **One booking per call.** If the caller changes the service or the slot before the hold is approved, call `create_booking_with_payment_link` again: the server replaces the pending booking. Once the hold is approved, the tool refuses (`already_booked`) and the business reschedules. Don't create bookings in parallel.
 - **The hold, explained:**
   - The amount is a **hold, not a charge**, and it is charged after the job.
   - Mention the no-show fee and free cancellation up to 24 h before.
@@ -748,12 +748,12 @@ The real-sandbox reauthorization check runs on or after **10-26**, using authori
 
 The schemas are flat (no `anyOf`/`oneOf`), with primitives and enums only.
 
-| Tool                               | Parameters                                                                                                                                                           | Result (typed object)                                                                                                                                                                                                          |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `get_services`                     | `category?` (`plumbing` \| `electrical`), `urgent?`                                                                                                                  | `{ services: [{ service_id, name, description, price: "$149.00", duration_min, no_show_fee: "$49.00" }] }`                                                                                                                     |
-| `check_availability`               | `service_id`, `preferred_date` (YYYY-MM-DD local), `time_of_day?` (`morning` \| `afternoon` \| `any`), `urgent?`                                                     | `{ slots: [{ slot_id, label: "Thu Oct 22, 10:00–12:00 CT", technician_first_name }] }` (≤ 3 slots)                                                                                                                             |
-| `create_booking_with_payment_link` | `service_id`, `slot_id`, `customer_name`, `customer_email`, `customer_phone?`, `service_address`, `problem_summary`, `urgency` (`emergency` \| `soon` \| `flexible`) | `{ ok, booking_ref, hold_amount, no_show_fee, cancellation_policy, delivery: "screen" \| "email" \| "screen_and_email", next_step }` or `{ ok:false, reason: "slot_taken" \| "invalid_slot" \| "authorize_in_progress", say }` |
-| `check_payment_status`             | `booking_ref?` (defaults to the call's current booking)                                                                                                              | `{ status: "waiting" \| "processing" \| "authorized" \| "declined_retry" \| "expired", appointment_label?, technician_first_name? }`                                                                                           |
+| Tool                               | Parameters                                                                                                                                                           | Result (typed object)                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_services`                     | `category?` (`plumbing` \| `electrical`), `urgent?`                                                                                                                  | `{ services: [{ service_id, name, description, price: "$149.00", duration_min, no_show_fee: "$49.00" }] }`                                                                                                                                                                                                                                                  |
+| `check_availability`               | `service_id`, `preferred_date` (YYYY-MM-DD local), `time_of_day?` (`morning` \| `afternoon` \| `any`), `urgent?`                                                     | `{ slots: [{ slot_id, label: "Thu Oct 22, 10:00–12:00 CT", technician_first_name }] }` (≤ 3 slots)                                                                                                                                                                                                                                                          |
+| `create_booking_with_payment_link` | `service_id`, `slot_id`, `customer_name`, `customer_email`, `customer_phone?`, `service_address`, `problem_summary`, `urgency` (`emergency` \| `soon` \| `flexible`) | `{ ok, booking_ref, hold_amount, no_show_fee, cancellation_policy, delivery: "screen" \| "email" \| "screen_and_email", next_step }` or `{ ok:false, reason: "slot_taken" \| "invalid_slot" \| "authorize_in_progress" \| "payment_check_failed" \| "invalid_name" \| "invalid_email" \| "invalid_address" \| "invalid_summary" \| "already_booked", say }` |
+| `check_payment_status`             | `booking_ref?` (defaults to the call's current booking)                                                                                                              | `{ status: "waiting" \| "processing" \| "authorized" \| "declined_retry" \| "expired" \| "completed" \| "cancelled" \| "none", appointment_label?, technician_first_name? }` (label and technician only for `authorized`)                                                                                                                                   |
 
 ### 13.3 Handler rules
 
@@ -769,8 +769,11 @@ The schemas are flat (no `anyOf`/`oneOf`), with primitives and enums only.
 - **Idempotency per call:**
   - **One active `pending_payment` booking per call or chat session.**
   - The same `toolCallId` returns the stored result.
-  - The same `service_id` and `slot_id` return the existing booking (same ref, no new email). Ledger key: `agent:create_booking:<callId>:<serviceId>:<slotId>`.
-  - A different service or slot **supersedes**: the old booking → `expired` (`superseded`) and its slot is released. The supersede is refused when the old booking's order is `APPROVED` or its authorize is in flight; the tool then returns `authorize_in_progress`.
+  - The same `service_id` and `slot_id` return the existing booking (same ref, no new email). No money moves here, so there is no ledger key: the call's tool calls are serialized on the `calls` row (`FOR UPDATE`), and a repeated `toolCallId` replays the result stored in `agent_tool_calls`.
+  - A different service or slot **supersedes**: the old booking → `expired` (`superseded`) and its slot is released. The supersede is refused when the old booking's order is `APPROVED` (also asked from PayPal for an open order) or its authorize is in flight; the tool then returns `authorize_in_progress`.
+  - Supersede and create are **one transaction**: if the new slot can't be booked, the old booking stays. The booking, its `email_link` pay token and the payment-link outbox row commit together.
+  - A pending booking past its pay window is not returned for the same slot: it is expired (`ttl`) and replaced.
+  - The optional phone is normalized (digits, a leading `+`, extensions dropped) and an unusable one is dropped, never a refusal. An unknown urgency becomes `flexible`.
 - **Result shapes:**
   - Handlers return typed objects.
   - The **Vapi adapter** sends `result: JSON.stringify(obj)` as one line.
@@ -827,9 +830,9 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
 
 ### 14.3 Web calls through our server proxy
 
-1. **Browser:** `new Vapi("proxy", APP_URL + "/api/vapi-proxy")`, then `vapi.start()`. Verified in the spike (2026-10-21): SDK 3.0.0 accepts the base URL and posts `/call/web` to our proxy.
+1. **Browser:** `new Vapi("proxy", APP_URL + "/api/vapi-proxy")`, then `vapi.start()`. Verified in the spike (2026-10-21): SDK 3.0.0 accepts the base URL and posts `/call/web` to our proxy. The owner lab uses its own base, `/api/vapi-proxy/lab`, so a /try cookie never changes what a lab call is.
 2. **`POST /api/vapi-proxy/call/web`:**
-   - Checks `Origin` and the workspace cookie, then **atomically reserves** the caps (§22). If a cap is reached → 429, and the UI offers the chat.
+   - Checks `Origin`, the workspace cookie and the pre-call form cookie (`__Host-hl_caller`, signed, 15 min), then **atomically reserves** the caps (§22) under one advisory lock: a free line, the call's maximum minutes, the per-workspace and per-IP counts, and a placeholder `calls` row. If a cap is reached → 429, and the UI offers the chat. Every exit without a bound call gives all of it back.
    - **Discards the client body** and calls `POST https://api.vapi.ai/call/web` with the **server-only public key** (`VAPI_PUBLIC_KEY`; `/call/web` answers the private key with 401 "Invalid Key", checked 2026-10-21): `{ assistantId, assistantOverrides: { variableValues: { channel: "web", first_name, email } } }`.
    - Stores `calls { vapi_call_id, workspace_id, channel: web, control_url (if present) }`.
    - Returns only the fields `@vapi-ai/web` 3.0.0 reads to join (`id`, `webCallUrl`, `transport.callToken`, `artifactPlan.videoRecordingEnabled`, `assistant.voice.provider`). The controlUrl, prompt and tool config never reach the browser.
@@ -873,10 +876,11 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
   - `/api/chat` limits the body to ≤ 8 KB (checked before parsing) and the message to ≤ 500 characters, with `assertSameOrigin` and the workspace cookie.
   - Turn limits are in §22.
 - **Same core:** the same prompt core plus the chat section, the same tool schemas and the same handlers.
-- **Runtime** (decided in stage 7, recorded in the README):
-  - **(a)** `generateContent` with `functionDeclarations`. The raw `Content[]` of each response is stored **verbatim**, with every part including `thoughtSignature`, in `calls.gemini_contents`, and sent back unchanged.
-  - **(b)** The Interactions API with `previous_interaction_id`.
-  - Either way: `thinkingLevel: "low"`, temperature at its default, `maxOutputTokens: 300`, and at most 5 tool round trips per turn.
+- **Runtime: (a), decided in stage 7 (README, `docs/gemini-notes.md`):** `generateContent` over REST with `functionDeclarations` (`parametersJsonSchema`). The raw `Content[]` of each response is stored **verbatim**, with every part including `thoughtSignature`, in `calls.gemini_contents`, and sent back unchanged. A turn's contents are appended in one statement when it ends and always end with a model turn. A turn that fails before any tool ran stores nothing; one that fails later keeps its completed round trips plus a closing line.
+  - Not (b), the Interactions API: it keeps conversations at Google (55 days by default on the paid tier).
+  - `thinkingLevel: "low"`, no temperature (ignored by 3.6+), `maxOutputTokens: 1024` (it includes thinking tokens), at most 5 requests per turn (the last one with function calling `NONE`; no new tool trip after 90 s), one turn at a time per chat (a 150 s lease, released only by its owner).
+  - Limits: 40 turns per chat, 80 per workspace and day, 120 per IP hash and day.
+  - A blocked prompt stores nothing. A turn that fails after tools ran keeps those round trips plus a closing model line, so history matches the database. Typed text that imitates `[payment-update]` is defused (checked on an NFKC copy without invisible characters), and in chat the model calls `check_payment_status` before it calls an appointment confirmed. Accepted residual risk: a homoglyph look-alike can still reach the model; it can only change wording, never money or the booking state.
   - History is capped at about 30 messages (about 8k tokens).
 - **Payment confirmation:** right after `onApprove` succeeds (polling is the backup), the pay panel calls `POST /api/chat/event { bookingId }`. The server:
   - checks in the DB that the booking is `authorized`
@@ -912,7 +916,7 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
 6. **Timeouts and failures:**
    - 3 s timeout, no blocking retries.
    - A 4xx/404 means the call has ended. The email covers the caller.
-7. **Browser fallback:** only when the state endpoint reports `notify: failed` or there is no controlUrl. The page then calls `vapi.say(...)` with the same text and records `via: browser`.
+7. **Browser fallback:** `call_notifications.outcome` records `spoken`, `not_spoken` (no controlUrl or an HTTP error), or `unknown` (the `say` timed out). The page speaks only after a definite `not_spoken`, a server claim that never settled (20 s), or no notice at all 4 s after `authorized`. A failed `add-message` after a spoken `say` is logged, never repeated aloud. The server re-checks its claim right before `say` (refreshing its clock), so the 20 s takeover can't overlap a live attempt. The page then calls `vapi.say(...)` with the same text and records `via: browser`, once.
 8. **Target:** speech starts **≤ 2 s** after the authorize response. Measured in the voice spike and in stage 8.
 
 ---

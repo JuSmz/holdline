@@ -80,3 +80,15 @@ export function slotLabel(start: Date, end: Date, timeZone: string, zoneLabel = 
     new Intl.DateTimeFormat("en-US", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(t);
   return `${day}, ${time(start)}–${time(end)} ${zoneLabel}`;
 }
+
+/** "Thursday, October 22, 10 AM to 12 PM Austin time": the spoken form for the confirmation (SPEC §16). */
+export function spokenSlot(start: Date, end: Date, timeZone: string, place = "Austin"): string {
+  const day = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long", month: "long", day: "numeric" }).format(
+    start,
+  );
+  const time = (t: Date) =>
+    new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit", hour12: true })
+      .format(t)
+      .replace(":00", "");
+  return `${day}, ${time(start)} to ${time(end)} ${place} time`;
+}

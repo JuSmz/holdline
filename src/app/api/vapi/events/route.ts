@@ -1,4 +1,7 @@
+import { getDb } from "@/db/client";
+import { scheduleSummary } from "@/server/agent/summary";
 import { dbErrorCode } from "@/server/db-error";
+import { settleWebCallMinutes } from "@/server/try/web-call";
 import { applyCallReport, applyCallStatus, findCallBinding, recordVapiEvent } from "@/server/vapi/calls";
 import { reportOf, statusOf, type VapiServerMessage } from "@/server/vapi/messages";
 import { answerToolCalls, endUnboundCall, toolErrorResponse } from "@/server/vapi/tools";
@@ -22,7 +25,12 @@ async function handle(message: VapiServerMessage): Promise<void> {
     }
     case "end-of-call-report": {
       const report = reportOf(message);
-      if (callId && report) await applyCallReport(callId, report);
+      if (!callId || !report) return;
+      const call = await applyCallReport(callId, report);
+      if (!call) return;
+      // The real minutes replace the reservation (§22); the owner summary runs after the response.
+      await settleWebCallMinutes(getDb(), call);
+      if (!call.lab) scheduleSummary(call.id);
       return;
     }
   }

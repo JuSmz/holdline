@@ -124,7 +124,8 @@ export class FakePayPal {
 
   private readonly replay = new Map<string, FakeResponse>();
   private rules: Rule[] = [];
-  private seq = 0;
+  // A random start per instance: a restarted mock server must not reuse IDs already in the database.
+  private seq = Math.floor(Math.random() * 1e9) * 1000;
   private clock: () => Date;
 
   constructor(options: { now?: () => Date } = {}) {

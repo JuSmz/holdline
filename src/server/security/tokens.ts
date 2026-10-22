@@ -8,7 +8,7 @@ import { safeEqual } from "./compare";
  * One signing helper for every token we hand out (SPEC §20). Each purpose has its own HKDF-derived
  * key and a `typ` claim, so a token minted for one purpose is rejected everywhere else.
  */
-export const TOKEN_PURPOSES = ["ws-cookie", "slot", "device-link", "email-confirm", "claim"] as const;
+export const TOKEN_PURPOSES = ["ws-cookie", "slot", "device-link", "email-confirm", "claim", "web-caller"] as const;
 export type TokenPurpose = (typeof TOKEN_PURPOSES)[number];
 
 /** Upper bounds per purpose (seconds). A `slot` token lives at most 30 minutes (SPEC §9.1). */
@@ -18,6 +18,8 @@ export const MAX_TTL_SECONDS: Record<TokenPurpose, number> = {
   "device-link": 24 * 3600,
   "email-confirm": 24 * 3600,
   claim: 15 * 60,
+  // The pre-call form's name and email, read by the web-call proxy (SPEC §14.3).
+  "web-caller": 15 * 60,
 };
 
 const VERSION = "v1";

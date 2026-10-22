@@ -59,6 +59,9 @@ export function loadBootConfig(env: Env = process.env): BootConfig {
   if (parsed.data.PAYPAL_MODE === "mock" && isOnRender(env)) {
     throw new ConfigError("PAYPAL_MODE=mock is not allowed on Render (judges must hit the real sandbox)");
   }
+  if (readVar(env, "GEMINI_MODE") === "mock" && isOnRender(env)) {
+    throw new ConfigError("GEMINI_MODE=mock is not allowed on Render (the chat must run the real agent)");
+  }
   return parsed.data;
 }
 

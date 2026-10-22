@@ -445,6 +445,9 @@ async function staleHolds(db: Db, now: Date): Promise<string[]> {
 // ── 8. Retention ─────────────────────────────────────────────────────────────────────────────────
 
 /** PII older than 14 days, in all workspaces (SPEC §21). Aggregates and PayPal IDs stay. */
+/** A placeholder older than this can't belong to a call that is still being created. */
+const PLACEHOLDER_MAX_AGE_MS = 60 * 60_000;
+
 export async function purgeExpiredPii(db: Db, now: Date): Promise<void> {
   const cutoff = new Date(now.getTime() - RETENTION_DAYS * DAY);
   await db
@@ -453,12 +456,22 @@ export async function purgeExpiredPii(db: Db, now: Date): Promise<void> {
     .where(and(lt(customers.createdAt, cutoff), isNull(customers.purgedAt)));
   await db
     .update(calls)
-    .set({ transcript: null, messages: null, geminiContents: null, summary: null, updatedAt: now })
+    .set({ transcript: null, messages: null, geminiContents: null, summary: null, caller: null, updatedAt: now })
     .where(
       and(
         lt(calls.createdAt, cutoff),
         eq(calls.sample, false),
-        sql`(${calls.transcript} is not null or ${calls.messages} is not null)`,
+        sql`(${calls.transcript} is not null or ${calls.messages} is not null or ${calls.caller} is not null)`,
+      ),
+    );
+  // A web-call placeholder whose Vapi call was never created (the server died before the undo).
+  await db
+    .delete(calls)
+    .where(
+      and(
+        eq(calls.status, "creating"),
+        isNull(calls.vapiCallId),
+        lt(calls.createdAt, new Date(now.getTime() - PLACEHOLDER_MAX_AGE_MS)),
       ),
     );
   await db.delete(vapiEvents).where(lt(vapiEvents.receivedAt, cutoff));

@@ -146,10 +146,39 @@ export const calls = pgTable(
     summary: jsonb("summary").$type<unknown>(),
     /** Read-only sample history in a cloned demo workspace (SPEC §17). */
     sample: boolean("sample").notNull().default(false),
+    /** Name and email from the web pre-call form or the chat form; they override tool arguments (§13.3). PII. */
+    caller: jsonb("caller").$type<{ firstName?: string; email?: string }>(),
+    /** A chat turn in progress (lease): a second message while the model answers gets "busy". */
+    chatTurnUntil: timestamp("chat_turn_until", { withTimezone: true }),
+    /** The owner summary is being written (claim), so a repeated end-of-call report doesn't pay twice. */
+    summaryStartedAt: timestamp("summary_started_at", { withTimezone: true }),
+    /** Demo web calls: voice minutes reserved at start (SPEC §22); settled against the reservation day. */
+    voiceReservedMinutes: integer("voice_reserved_minutes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("calls_created_idx").on(t.createdAt), index("calls_workspace_idx").on(t.workspaceId, t.createdAt)],
+);
+
+/**
+ * Agent tool results by toolCallId (SPEC §13.3): a replayed tool call returns the stored result.
+ * Results carry refs and amounts, never the caller's free text.
+ */
+export const agentToolCalls = pgTable(
+  "agent_tool_calls",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    callId: uuid("call_id")
+      .notNull()
+      .references(() => calls.id, { onDelete: "cascade" }),
+    toolCallId: text("tool_call_id").notNull(),
+    name: text("name").notNull(),
+    result: jsonb("result").$type<unknown>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_tool_calls_call_tool_uq").on(t.callId, t.toolCallId)],
 );
 
 /**
@@ -333,6 +362,10 @@ export const bookings = pgTable(
     uniqueIndex("bookings_live_slot_uq")
       .on(t.technicianId, t.slotStart)
       .where(sql`status in ('pending_payment', 'authorized') and not sample`),
+    // One pending booking per call or chat session (SPEC §13.3); a supersede expires the old one first.
+    uniqueIndex("bookings_one_pending_per_call_uq")
+      .on(t.callId)
+      .where(sql`status = 'pending_payment' and call_id is not null`),
   ],
 );
 
@@ -573,6 +606,11 @@ export const callNotifications = pgTable(
     channel: text("channel").notNull(),
     via: notifyVia("via"),
     ok: boolean("ok"),
+    /**
+     * spoken | not_spoken | unknown (the say timed out) | appended (chat) | browser. Null while the
+     * server attempt runs; the browser may take over only after a definite not_spoken (SPEC §16.7).
+     */
+    outcome: text("outcome"),
     sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("call_notifications_uq").on(t.bookingId, t.status, t.channel)],

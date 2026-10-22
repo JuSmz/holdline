@@ -50,6 +50,13 @@
       "when": 1792623159633,
       "tag": "0006_recovery_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792631406419,
+      "tag": "0007_agent_core",
+      "breakpoints": true
     }
   ]
 }

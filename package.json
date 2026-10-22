@@ -26,7 +26,8 @@
     "db:seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
     "paypal:webhook:setup": "tsx --env-file-if-exists=.env scripts/paypal-webhook-setup.ts",
     "sandbox:smoke": "tsx --env-file-if-exists=.env scripts/sandbox-smoke.ts",
-    "vapi:setup": "tsx --env-file-if-exists=.env scripts/vapi-setup.ts"
+    "vapi:setup": "tsx --env-file-if-exists=.env scripts/vapi-setup.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
@@ -39,14 +40,17 @@
     "lucide-react": "1.58.0",
     "next": "16.4.2",
     "postgres": "3.4.9",
+    "qrcode": "1.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "server-only": "0.0.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tailwindcss/turbopack": "4.3.3",
     "@types/node": "24.19.2",
+    "@types/qrcode": "1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "drizzle-kit": "0.31.11",

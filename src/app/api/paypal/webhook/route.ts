@@ -4,7 +4,7 @@ import { getDb } from "@/db/client";
 import { webhookEvents } from "@/db/schema";
 import { readVar } from "@/server/config/env";
 import { dbErrorCode } from "@/server/db-error";
-import { defaultContext } from "@/server/payments/context";
+import { configuredContext } from "@/server/payments/context";
 import { processWebhookEvent } from "@/server/payments/webhook-processor";
 import { getPayPalClient, labEnabled, PayPalNotConfiguredError } from "@/server/paypal";
 import { eventResourceId, type PayPalEvent } from "@/server/paypal/webhook-events";
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
 
   let ctx;
   try {
-    ctx = defaultContext();
+    ctx = configuredContext();
   } catch (error) {
     if (error instanceof PayPalNotConfiguredError) return Response.json({ ok: true, duplicate, processed: false });
     throw error;

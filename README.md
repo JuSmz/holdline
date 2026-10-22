@@ -23,6 +23,7 @@ Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com/). **P
   - Orders v2 (authorize), Payments v2 (capture, void, reauthorize), Invoicing v2, Payouts v1, verified webhooks
   - JS SDK v6 on the pay page
 - **Voice:** Vapi, using Google Gemini as the model
+- **Chat:** the Gemini Developer API (`generateContent` over REST), same prompt core and tools as the voice agent
 - **Email:** Resend
 
 ## Run locally
@@ -48,10 +49,25 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
 - **unit tests**
 - **integration tests** against the local test database (`DATABASE_URL_TEST`)
 
+`pnpm test:e2e` runs the Playwright chat happy path in mock mode (fake PayPal, fake Gemini, its own
+`holdline_e2e` database, the installed Chrome). It calls no paid API.
+
+## Chat runtime decision (stage 7)
+
+The text chat uses **stateless `generateContent`** with the raw `Content[]` stored in our own database
+(`calls.gemini_contents`), not the Interactions API:
+
+- the conversation stays in our database (the Interactions API keeps it at Google for up to 55 days by default);
+- every model part is stored and sent back verbatim, so Gemini 3's thought signatures survive function calling;
+- a turn's contents are appended atomically when it completes, so history never holds a call without its response.
+
+Details and sources: [`docs/gemini-notes.md`](docs/gemini-notes.md).
+
 ## Safety rails
 
 - The server **refuses to start** unless `PAYPAL_ENV=sandbox`.
 - Prices come only from the database. The AI agent has no tool that moves money.
+- A global daily Gemini budget (`GEMINI_DAILY_BUDGET_CENTS`, counted from `usageMetadata`) and a daily voice-minute cap (`DEMO_DAILY_VOICE_MINUTES`) stop paid usage.
 - Every PayPal POST carries a `PayPal-Request-Id`. A forward-only booking state machine is enforced in code and by a database trigger.
 
 ---

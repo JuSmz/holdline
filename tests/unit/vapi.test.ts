@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assistantBody,
-  LAB_SYSTEM_PROMPT,
+  SYSTEM_PROMPT,
   TOOL_DEFINITIONS,
   toolBody,
   type SetupInput,
@@ -205,7 +205,7 @@ describe("projectWebCall", () => {
       transport: { provider: "daily", callUrl: "https://vapi.daily.co/room" },
       assistant: {
         voice: { provider: "vapi", voiceId: "Elliot" },
-        model: { model: "gemini-3.5-flash", messages: [{ role: "system", content: LAB_SYSTEM_PROMPT }] },
+        model: { model: "gemini-3.5-flash", messages: [{ role: "system", content: SYSTEM_PROMPT }] },
         server: { url: "https://holdline.test/api/vapi/events" },
       },
     });
@@ -265,8 +265,20 @@ describe("saved assistant configuration", () => {
   });
 
   it("forbids confirmation words before a payment update", () => {
-    expect(LAB_SYSTEM_PROMPT).toContain("Never say confirmed, booked, all set, locked in or reserved");
-    expect(LAB_SYSTEM_PROMPT).toContain("[payment-update]");
+    expect(SYSTEM_PROMPT).toContain("never say confirmed, booked, all set, locked in or reserved");
+    expect(SYSTEM_PROMPT).toContain("[payment-update]");
+  });
+
+  it("saves the four agent tools and a prompt with the per-call Liquid variables", () => {
+    expect(TOOL_DEFINITIONS.map((t) => t.name)).toEqual([
+      "get_services",
+      "check_availability",
+      "create_booking_with_payment_link",
+      "check_payment_status",
+    ]);
+    expect(SYSTEM_PROMPT).toContain('{% if channel == "phone" %}');
+    expect(SYSTEM_PROMPT).toContain("{{first_name}}");
+    expect(SYSTEM_PROMPT).toContain('{{"now" | date:');
   });
 });
 

@@ -1,7 +1,7 @@
 import { getDb } from "@/db/client";
 import { readSecret } from "@/server/config/env";
 import { recordTick } from "@/server/meta";
-import { defaultContext, type PaymentContext } from "@/server/payments/context";
+import { configuredContext, type PaymentContext } from "@/server/payments/context";
 import { runTick } from "@/server/payments/jobs";
 import { PayPalNotConfiguredError } from "@/server/paypal";
 import { bearerMatches } from "@/server/security/compare";
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
   let ctx: PaymentContext | null = null;
   try {
-    ctx = defaultContext();
+    ctx = configuredContext();
   } catch (error) {
     if (!(error instanceof PayPalNotConfiguredError)) throw error;
   }

@@ -31,7 +31,7 @@ import {
 
 const MINUTE = 60_000;
 /** An order created before the TTL may still be authorized this long after it (SPEC §9.2). */
-const TTL_GRACE_MS = 10 * MINUTE;
+export const TTL_GRACE_MS = 10 * MINUTE;
 const AUTHORIZING_MS = 2 * MINUTE;
 /** PENDING (under review) authorizations keep the slot this much longer (SPEC §8.3). */
 const PENDING_HOLD_MS = 6 * 60 * MINUTE;

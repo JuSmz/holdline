@@ -21,6 +21,8 @@ export type NoticeOutcome = {
   controlUrlSource: "binding" | "api" | "none";
   say: ControlResult | null;
   addMessage: ControlResult | null;
+  /** The notice was taken over before it was spoken. */
+  skipped?: boolean;
 };
 
 /** The controlUrl from the binding, otherwise from GET /call/{id} (then remembered). */
@@ -44,25 +46,39 @@ async function controlUrlFor(
 }
 
 /** `say` the fixed sentence, then `add-message` so the model's context matches what was said (SPEC §16). */
-export async function sendPaymentNotice(
+export async function sendCallNotice(
   binding: CallBinding,
-  notice: PaymentNotice,
-  bookingRef: string,
+  notice: { say: string; note: string },
+  /** Checked right before speaking: false means someone else (the browser) took the notice over. */
+  stillOurs: () => Promise<boolean> = async () => true,
 ): Promise<NoticeOutcome> {
   const { url, source } = await controlUrlFor(binding);
   if (!url) return { controlUrlSource: source, say: null, addMessage: null };
+  if (!(await stillOurs())) return { controlUrlSource: source, say: null, addMessage: null, skipped: true };
   const say = await sendControl(url, {
     type: "say",
-    content: LAB_NOTICE_TEXT[notice],
+    content: notice.say,
     interruptionsEnabled: false,
     interruptAssistantEnabled: false,
   });
   const addMessage = say.ok
     ? await sendControl(url, {
         type: "add-message",
-        message: { role: "system", content: `[payment-update] ${bookingRef} ${notice}; the caller has been told.` },
+        message: { role: "system", content: notice.note },
         triggerResponseEnabled: false,
       })
     : null;
   return { controlUrlSource: source, say, addMessage };
 }
+
+/** The voice lab's "Simulate payment" with the stage-4 sentences. */
+export async function sendPaymentNotice(
+  binding: CallBinding,
+  notice: PaymentNotice,
+  bookingRef: string,
+): Promise<NoticeOutcome> {
+  return sendCallNotice(binding, { say: LAB_NOTICE_TEXT[notice], note: paymentUpdateNote(bookingRef, notice) });
+}
+
+export const paymentUpdateNote = (ref: string, notice: PaymentNotice) =>
+  `[payment-update] ${ref} ${notice}; the caller has been told.`;
