@@ -17,6 +17,8 @@ export function PayLink(props: {
   mocked: boolean;
   /** A used or finished link: only the final state, no polling, no payment. */
   readOnly?: boolean;
+  /** false when the page already puts the panel in a card. */
+  framed?: boolean;
 }) {
   const router = useRouter();
   const live = !props.readOnly && LIVE.has(props.booking.panel);
@@ -35,6 +37,7 @@ export function PayLink(props: {
       mocked={props.mocked}
       endpoints={{ order: `${base}/order`, authorize: `${base}/authorize`, mockApprove: `${base}/mock-approve` }}
       onAuthorized={() => router.refresh()}
+      framed={props.framed}
     />
   );
 }

@@ -4,13 +4,17 @@ import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { getDb } from "@/db/client";
 import { calls, vapiEvents } from "@/db/schema";
 import { dbErrorCode } from "@/server/db-error";
+import { fenceCall } from "@/server/workspaces/fence";
 
 import { isAllowedControlUrl } from "./control";
 import { redactForFixture, type CallReport } from "./messages";
 
 export type CallBinding = typeof calls.$inferSelect;
 
-/** Stores a payload as a fixture (redacted). Failures are logged, never thrown: fixtures must not break a call. */
+/**
+ * Stores a payload as a fixture (redacted). Failures are logged, never thrown: fixtures must not break a
+ * call. Nothing is kept for a call of a reset demo copy (the payload may carry its transcript).
+ */
 export async function recordVapiEvent(input: {
   endpoint: "events" | "tools" | "proxy";
   messageType: string;
@@ -19,15 +23,23 @@ export async function recordVapiEvent(input: {
   payload: unknown;
 }): Promise<void> {
   try {
-    await getDb()
-      .insert(vapiEvents)
-      .values({
-        endpoint: input.endpoint,
-        messageType: input.messageType.slice(0, 100),
-        vapiCallId: input.vapiCallId?.slice(0, 100) ?? null,
-        callType: input.callType?.slice(0, 50) ?? null,
-        payload: redactForFixture(input.payload),
-      });
+    const values = {
+      endpoint: input.endpoint,
+      messageType: input.messageType.slice(0, 100),
+      vapiCallId: input.vapiCallId?.slice(0, 100) ?? null,
+      callType: input.callType?.slice(0, 50) ?? null,
+      payload: redactForFixture(input.payload),
+    };
+    const vapiCallId = input.vapiCallId;
+    if (!vapiCallId) {
+      await getDb().insert(vapiEvents).values(values);
+      return;
+    }
+    await getDb().transaction(async (tx) => {
+      const call = await fenceCall(tx, eq(calls.vapiCallId, vapiCallId), "key share");
+      if (call?.reset) return;
+      await tx.insert(vapiEvents).values(values);
+    });
   } catch (error) {
     console.error(
       `[holdline] could not store Vapi event ${input.messageType} for ${input.vapiCallId ?? "?"}: ${dbErrorCode(error)}`,
@@ -87,26 +99,34 @@ export async function applyCallStatus(vapiCallId: string, status: string, contro
   await rememberControlUrl(vapiCallId, controlUrl);
 }
 
-/** Stores the end-of-call report. A repeated report overwrites with the same data. */
+/**
+ * Stores the end-of-call report. A repeated report overwrites with the same data. A call of a reset
+ * demo copy keeps the report's numbers (length, cost: the minutes are settled from them) but not what
+ * was said: the report may arrive after the reset purged the copy.
+ */
 export async function applyCallReport(vapiCallId: string, report: CallReport): Promise<CallBinding | undefined> {
-  const [row] = await getDb()
-    .update(calls)
-    .set({
-      status: "ended",
-      endedReason: report.endedReason,
-      costCents: report.costCents,
-      startedAt: report.startedAt ?? undefined,
-      endedAt: report.endedAt ?? new Date(),
-      durationS: report.durationS,
-      transcript: report.transcript,
-      messages: report.messages,
-      metrics: report.metrics,
-      llmModel: report.llmModel ?? undefined,
-      updatedAt: new Date(),
-    })
-    .where(eq(calls.vapiCallId, vapiCallId))
-    .returning();
-  return row;
+  return getDb().transaction(async (tx) => {
+    const call = await fenceCall(tx, eq(calls.vapiCallId, vapiCallId), "no key update");
+    if (!call) return undefined;
+    const [row] = await tx
+      .update(calls)
+      .set({
+        status: "ended",
+        endedReason: report.endedReason,
+        costCents: report.costCents,
+        startedAt: report.startedAt ?? undefined,
+        endedAt: report.endedAt ?? new Date(),
+        durationS: report.durationS,
+        transcript: call.reset ? null : report.transcript,
+        messages: call.reset ? null : report.messages,
+        metrics: report.metrics,
+        llmModel: report.llmModel ?? undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(calls.id, call.id))
+      .returning();
+    return row;
+  });
 }
 
 /** Lab calls only: the notify route never acts on a call the lab didn't start. */

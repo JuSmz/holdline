@@ -933,7 +933,7 @@ The script prints `VAPI_ASSISTANT_ID`. That is an ID, not a secret.
   - hours Mon–Fri 8–18 and Sat 9–13
   - a sandbox buyer assigned round-robin from `SANDBOX_BUYERS`
   - **read-only sample history** (past calls, captured bookings, payouts), labelled "Sample"
-- **Header badge:** "Your private demo copy · Northside #4821", with **Open on another device** (a signed magic link plus a QR code, 24 h) and **Reset** (with confirmation; it hard-deletes PII).
+- **Header badge:** "Your private demo copy · Northside #4821", with **Open on another device** (a signed magic link plus a QR code, 24 h) and **Reset** ("Start a fresh demo", with confirmation): it hard-deletes the copy's PII at once, releases its open holds without a fee (unapproved bookings are withdrawn) after the response, drops the cookie and returns to the start card.
 - **What `/try` shows:**
   - the stepper: ① customer → ② approve the hold → ③ owner
   - **Call in browser** or **Chat** as equal options, with the mic preflight

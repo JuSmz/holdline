@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, or, sql } from "drizzle-orm";
 
 import {
   bookingEvents,
@@ -18,19 +18,9 @@ import { buyerFor } from "@/server/workspaces/demo";
 import type { Workspace } from "@/server/workspaces/guard";
 import { browserFallbackAllowed } from "@/server/agent/notify";
 
-export type PanelState =
-  | "waiting"
-  | "processing"
-  | "declined_retry"
-  | "reapprove"
-  | "authorized"
-  | "done"
-  | "late_cancel"
-  | "no_show"
-  | "fee_pending"
-  | "missed"
-  | "cancelled"
-  | "expired";
+import { demoStep, type PanelState } from "./panel";
+
+export type { PanelState };
 
 export type BookingView = {
   id: string;
@@ -89,6 +79,46 @@ export async function conversationState(db: Db, ws: Workspace, call: typeof call
     buyer: buyerFor(wsRow.sandboxBuyerIndex),
     lines: call.channel === "chat" ? chatLines(call) : undefined,
   };
+}
+
+/** How long /try offers to pick a conversation back up. */
+const RESUME_WINDOW_MS = 24 * 3_600_000;
+
+export type ResumeView = { callId: string; channel: "chat" | "web"; step: 1 | 2 | 3; panel: PanelState | null };
+
+/**
+ * /try with a demo copy: the visitor's newest conversation of the last 24 h (a chat with at least one
+ * line, or a browser call that really started; never the owner lab or sample history) and where its
+ * newest booking stands, so the page shows the real step and a way back in. A plain read.
+ */
+export async function latestConversation(db: Db, ws: Workspace, now: Date): Promise<ResumeView | null> {
+  const [call] = await db
+    .select({ id: calls.id, channel: calls.channel })
+    .from(calls)
+    .where(
+      and(
+        eq(calls.workspaceId, ws.id),
+        eq(calls.lab, false),
+        eq(calls.sample, false),
+        gt(calls.updatedAt, new Date(now.getTime() - RESUME_WINDOW_MS)),
+        or(
+          and(eq(calls.channel, "chat"), sql`coalesce(${calls.messages}, '[]'::jsonb) <> '[]'::jsonb`),
+          and(eq(calls.channel, "web"), isNotNull(calls.vapiCallId)),
+        ),
+      ),
+    )
+    .orderBy(desc(calls.createdAt))
+    .limit(1);
+  if (!call || call.channel === "phone") return null;
+  const rows = await db
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.callId, call.id), eq(bookings.workspaceId, ws.id)))
+    .orderBy(desc(bookings.createdAt));
+  // The same "current booking" as the conversation poll: the newest one that didn't expire.
+  const current = rows.find((b) => b.status !== "expired") ?? rows[0];
+  const panel = current ? await panelFor(db, current) : null;
+  return { callId: call.id, channel: call.channel, step: demoStep(panel), panel };
 }
 
 /**

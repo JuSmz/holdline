@@ -12,6 +12,7 @@ import {
   paymentOperations,
   payouts,
   paypalOrders,
+  rateCounters,
   vapiEvents,
   webhookEvents,
   workspaces,
@@ -24,6 +25,7 @@ import { payPalToCents } from "@/server/money";
 import { alreadyDoneOutcome, PayPalApiError } from "@/server/paypal/errors";
 import { getOrder } from "@/server/paypal/orders";
 import { getAuthorization as getPayPalAuthorization, getCapture, voidAuthorization } from "@/server/paypal/payments";
+import { purgeDemoWorkspacePii, recentlyResetWorkspaceIds, releaseDemoWorkspaceHolds } from "@/server/workspaces/reset";
 
 import { applyAuthorization, type AuthInfo, authorizeBooking, createOrderForBooking, voidOrphan } from "./authorize";
 import { applyCapture, captureBooking, type CaptureInfo, type CaptureKind } from "./capture";
@@ -96,14 +98,18 @@ export async function runTick(ctx: PaymentContext | null, db: Db, now: Date = ne
     await each("expire_unpaid", await unpaidExpired(db, now), (b) => expireUnpaid(ctx, b.id));
     // 4. Reauthorize
     await each("reauthorize", await dueReauthorizations(db, now), (bookingId) => reauthorizeBooking(ctx, bookingId));
-    // 5. Release stale holds
+    // 5. Release stale holds, and the holds of demo copies reset in the last hour (SPEC §17): one an
+    // authorize placed while the reset ran, or a release the reset's own attempt didn't finish.
     await each("stale_holds", await staleHolds(db, now), (bookingId) => releaseStaleHold(ctx, bookingId));
+    await each("reset_holds", await recentlyResetWorkspaceIds(db, now), (id) => releaseDemoWorkspaceHolds(ctx, id));
     // 6. Payouts
     await each("payouts_sent", await pendingPayoutIds(db, BATCH), (id) => sendPayout(ctx, id));
     // 7. Summaries: stage 8.
   }
-  // 8. Retention (no PayPal needed)
+  // 8. Retention (no PayPal needed). A copy reset in the last hour is purged again: a late write that
+  // raced the reset (e.g. a conversation created during it) is cleared within one tick.
   await each("retention", [now], (at) => purgeExpiredPii(db, at));
+  await each("reset_purge", await recentlyResetWorkspaceIds(db, now), (id) => purgeDemoWorkspacePii(db, id, now));
   return report;
 }
 
@@ -444,16 +450,24 @@ async function staleHolds(db: Db, now: Date): Promise<string[]> {
 
 // ── 8. Retention ─────────────────────────────────────────────────────────────────────────────────
 
-/** PII older than 14 days, in all workspaces (SPEC §21). Aggregates and PayPal IDs stay. */
 /** A placeholder older than this can't belong to a call that is still being created. */
 const PLACEHOLDER_MAX_AGE_MS = 60 * 60_000;
 
+/**
+ * PII older than 14 days, in all workspaces (SPEC §21). Aggregates and PayPal IDs stay. Also deletes
+ * expired rate counters (they carry no PII, but nothing else removes them).
+ */
 export async function purgeExpiredPii(db: Db, now: Date): Promise<void> {
   const cutoff = new Date(now.getTime() - RETENTION_DAYS * DAY);
   await db
     .update(customers)
     .set({ name: null, email: null, phone: null, address: null, purgedAt: now })
     .where(and(lt(customers.createdAt, cutoff), isNull(customers.purgedAt)));
+  // The caller's own description of the problem (SPEC §19); seeded sample text stays.
+  await db
+    .update(bookings)
+    .set({ problemSummary: null, updatedAt: now })
+    .where(and(lt(bookings.createdAt, cutoff), eq(bookings.sample, false), isNotNull(bookings.problemSummary)));
   await db
     .update(calls)
     .set({ transcript: null, messages: null, geminiContents: null, summary: null, caller: null, updatedAt: now })
@@ -493,6 +507,7 @@ export async function purgeExpiredPii(db: Db, now: Date): Promise<void> {
     .update(emailIdentities)
     .set({ email: null })
     .where(and(lt(emailIdentities.createdAt, cutoff), isNotNull(emailIdentities.email)));
+  await db.delete(rateCounters).where(lt(rateCounters.expiresAt, now));
 }
 
 // ── Ledger results not yet reflected in the domain tables ─────────────────────────────────────────

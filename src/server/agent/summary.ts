@@ -1,14 +1,15 @@
 import { after } from "next/server";
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lt, notExists, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb } from "@/db/client";
-import { calls } from "@/db/schema";
+import { calls, workspaces } from "@/db/schema";
 import type { Db } from "@/db/types";
 import { chatLines } from "@/server/chat/transcript";
 import { dbErrorCode } from "@/server/db-error";
 import { budgetedGenerate } from "@/server/gemini/budget";
 import { type GeminiClient, geminiConfig, getGeminiClient } from "@/server/gemini/client";
+import { fenceCall } from "@/server/workspaces/fence";
 
 /**
  * The owner's call summary (SPEC §20 AI stance): Gemini structured output over the transcript, which
@@ -62,7 +63,8 @@ export async function summarizeCall(
   deps: { db: Db; gemini: GeminiClient; model: string; dailyBudgetCents: number; now: () => Date },
   callId: string,
 ): Promise<CallSummary | null> {
-  // Claim first (a repeated end-of-call report must not pay twice); a stale claim is taken over.
+  // Claim first (a repeated end-of-call report must not pay twice); a stale claim is taken over. A reset
+  // demo copy gets no summary (and no model spend): the purge already cleared its conversations.
   const [call] = await deps.db
     .update(calls)
     .set({ summaryStartedAt: deps.now() })
@@ -71,6 +73,12 @@ export async function summarizeCall(
         eq(calls.id, callId),
         isNull(calls.summary),
         or(isNull(calls.summaryStartedAt), lt(calls.summaryStartedAt, new Date(deps.now().getTime() - CLAIM_MS))),
+        notExists(
+          deps.db
+            .select({ id: workspaces.id })
+            .from(workspaces)
+            .where(and(eq(workspaces.id, calls.workspaceId), isNotNull(workspaces.resetAt))),
+        ),
       ),
     )
     .returning();
@@ -104,8 +112,14 @@ export async function summarizeCall(
     return null;
   }
   const summary: CallSummary = { ...parsed, model: deps.model, at: deps.now().toISOString() };
-  await deps.db.update(calls).set({ summary }).where(eq(calls.id, callId));
-  return summary;
+  // The reset fence: a copy reset while the model was answering keeps no summary (its `problem` is PII).
+  const stored = await deps.db.transaction(async (tx) => {
+    const fenced = await fenceCall(tx, eq(calls.id, callId), "no key update");
+    if (!fenced || fenced.reset) return false;
+    await tx.update(calls).set({ summary }).where(eq(calls.id, callId));
+    return true;
+  });
+  return stored ? summary : null;
 }
 
 /** Runs the summary after the response (end-of-call report, chat confirmation); failures are logged only. */

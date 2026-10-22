@@ -9,7 +9,7 @@ import { POST as mockApprove } from "@/app/api/try/bookings/[id]/mock-approve/ro
 import { POST as cookieOrder } from "@/app/api/try/bookings/[id]/order/route";
 import { closeDb, getDb } from "@/db/client";
 import { bookingEvents, bookings, paypalOrders } from "@/db/schema";
-import { dashboardData } from "@/server/dashboard/queries";
+import { dashboardState } from "@/server/dashboard/queries";
 import { createOrderForBooking } from "@/server/payments/authorize";
 import { panelFor } from "@/server/try/state";
 import { payLinkBooking, payLinkView } from "@/server/try/pay";
@@ -140,12 +140,23 @@ describe("owner dashboard", () => {
     const ws = await makeWorkspace(getDb());
     const now = new Date();
     const soon = await makeBooking(getDb(), ws.id, { now, slotStart: new Date(now.getTime() + 20 * 3_600_000) });
-    const data = await dashboardData(getDb(), ws);
+    await getDb().update(bookings).set({ status: "authorized" }).where(eq(bookings.id, soon.id));
+    const later = await makeBooking(getDb(), ws.id, { now, slotStart: new Date(now.getTime() + 30 * 3_600_000) });
+    await getDb().update(bookings).set({ status: "authorized" }).where(eq(bookings.id, later.id));
+    const data = await dashboardState(getDb(), ws, now);
     expect(data.bookings.find((b) => b.id === soon.id)).toMatchObject({
       slotStart: soon.slotStart.toISOString(),
       cancelWindowHours: 24,
+      lateNow: true,
+      started: false,
+      actions: ["job_done", "no_show", "cancel"],
+      noShowFee: "$49.00",
+      hold: "$149.00",
     });
-    await getDb().update(bookings).set({ status: "authorized" }).where(eq(bookings.id, soon.id));
+    // The rule comes from the server clock, not the visitor's device: it flips once the window is reached.
+    expect(data.bookings.find((b) => b.id === later.id)).toMatchObject({ lateNow: false });
+    const sevenHoursOn = await dashboardState(getDb(), ws, new Date(now.getTime() + 7 * 3_600_000));
+    expect(sevenHoursOn.bookings.find((b) => b.id === later.id)).toMatchObject({ lateNow: true });
     const res = await dashboardAction(
       new Request(`http://localhost:3000/api/dashboard/bookings/${soon.id}/action`, {
         method: "POST",

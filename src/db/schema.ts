@@ -45,6 +45,11 @@ export const workspaces = pgTable("workspaces", {
   sandboxBuyerIndex: integer("sandbox_buyer_index"),
   createdAt: createdAt(),
   lastActiveAt: timestamp("last_active_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * "Start a fresh demo" (SPEC §17, §21), set by the reset purge: the copy is dead from then on. The
+   * guard treats it as gone, and late writers (Vapi reports, chat turns, summaries) keep no PII in it.
+   */
+  resetAt: timestamp("reset_at", { withTimezone: true }),
 });
 
 /** Small key/value table for app-wide facts such as the job heartbeat (`last_tick_at`). */
@@ -102,7 +107,11 @@ export const webhookEvents = pgTable(
     /** A short processing lease (stage 6): no transaction is held open while a handler runs. */
     claimedUntil: timestamp("claimed_until", { withTimezone: true }),
   },
-  (t) => [index("webhook_events_received_idx").on(t.receivedAt)],
+  (t) => [
+    index("webhook_events_received_idx").on(t.receivedAt),
+    // The reset purge clears the raw payloads of one demo copy's PayPal resources.
+    index("webhook_events_resource_idx").on(t.resourceId),
+  ],
 );
 
 export const callChannel = pgEnum("call_channel", ["web", "phone", "chat"]);
@@ -674,5 +683,9 @@ export const rateCounters = pgTable(
     n: integer("n").notNull().default(0),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
-  (t) => [uniqueIndex("rate_counters_uq").on(t.scope, t.key, t.window)],
+  (t) => [
+    uniqueIndex("rate_counters_uq").on(t.scope, t.key, t.window),
+    // The tick's retention step deletes expired counters.
+    index("rate_counters_expires_idx").on(t.expiresAt),
+  ],
 );

@@ -271,7 +271,10 @@ async function createBookingTool(ctx: AgentContext, call: AgentCall, raw: Json):
     result = await ctx.db.transaction(async (tx) => {
       // One booking per call: serialize this call's tool calls on its row.
       await tx.select({ id: calls.id }).from(calls).where(eq(calls.id, call.callRowId)).for("update");
+      // The reset fence (src/server/workspaces/fence.ts): read after the row lock, which the reset purge
+      // also takes, so a copy reset meanwhile gets no new customer, booking or email.
       const [ws] = await tx.select().from(workspaces).where(eq(workspaces.id, call.workspaceId));
+      if (ws.resetAt) throw new BookingRefusal("demo_reset", "This demo was reset, so I can't book anything here.");
       const describe = (b: Booking) => ({
         label: slotLabel(b.slotStart, b.slotEnd, ws.timezone),
         policy: CANCELLATION(formatUsd(b.noShowFeeCents), policyOf(ws.policy).cancellationWindowHours),

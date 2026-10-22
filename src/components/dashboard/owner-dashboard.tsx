@@ -1,172 +1,230 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { Tabs } from "@base-ui/react/tabs";
+import { cn } from "cn";
+import { CheckCircle2, CircleAlert, Info } from "lucide-react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import type { DashboardData } from "@/server/dashboard/queries";
+import { Notice } from "@/components/ui/notice";
+import type { ActionKey } from "@/server/dashboard/actions";
 
-const ACTIONS = [
-  { action: "job_done", label: "Job done", confirm: (b: Row) => `Capture ${b.amount} for ${b.ref}?` },
-  {
-    action: "no_show",
-    label: "No-show",
-    confirm: (b: Row) => `Charge the ${b.noShowFee} no-show fee for ${b.ref}? The rest of the hold is released.`,
-  },
-  {
-    action: "cancel",
-    label: "Cancel",
-    confirm: (b: Row, late: boolean) =>
-      late
-        ? `Late cancellation (less than ${b.cancelWindowHours} hours before the visit): the ${b.noShowFee} fee will be charged for ${b.ref}. Continue?`
-        : `Free cancellation: the ${b.amount} hold for ${b.ref} is released and nothing is charged. Continue?`,
-  },
-] as const;
+import { BookingSheet, type BookingTarget } from "./booking-sheet";
+import { BookingsTab } from "./bookings-tab";
+import { CallSheet } from "./call-sheet";
+import { CallsTab } from "./calls-tab";
+import { EmailSheet } from "./email-sheet";
+import { OutboxTab } from "./outbox-tab";
+import { Overview } from "./overview";
+import { PaymentsTab } from "./payments-tab";
+import { PriceListTab } from "./price-list-tab";
+import type { State } from "./shared";
+import { DASHBOARD_TABS, type DashboardTab, tabFrom } from "./tabs";
+import { type LiveStatus, useLive } from "./use-live";
 
-type Row = DashboardData["bookings"][number];
+type Toast = { id: number; text: string; tone: "success" | "info" | "danger" };
 
-/** The late-cancellation rule at the moment of the click (the server checks the same rule). */
-const isLate = (b: Row) => new Date(b.slotStart).getTime() - Date.now() < b.cancelWindowHours * 3_600_000;
+/** A tab panel is a focus stop (Base UI gives it tabIndex 0): it shows the same ring as the tabs. */
+const PANEL = "rounded-2xl outline-none focus-visible:ring-4 focus-visible:ring-brand/25";
 
-/** The minimal owner page (stage 7): bookings with their actions, the PayPal activity feed, the outbox. */
-export function OwnerDashboard({ data }: { data: DashboardData }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-
-  async function act(row: Row, action: (typeof ACTIONS)[number]) {
-    // The rule the owner sees is the rule the server is asked to apply (it refuses if that changed).
-    const late = isLate(row);
-    if (!window.confirm(action.confirm(row, late))) return;
-    setBusy(row.id);
-    setMessage(null);
-    try {
-      const res = await fetch(`/api/dashboard/bookings/${row.id}/action`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(
-          action.action === "cancel" ? { action: action.action, expectLate: late } : { action: action.action },
-        ),
-      });
-      const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-      setMessage(
-        data?.ok
-          ? `${row.ref}: ${String(data.bookingStatus)}${data.flag ? ` (${String(data.flag)})` : ""}`
-          : `${row.ref}: ${String(data?.message ?? "failed")}`,
-      );
-    } finally {
-      setBusy(null);
-      router.refresh();
-    }
+/**
+ * The owner view of the visitor's demo copy (SPEC §18): six tabs, a booking / call / email sheet, and a
+ * poll every 3 s while visible, so money movement shows up in place within seconds.
+ */
+export function OwnerDashboard({ initial }: { initial: State }) {
+  const { data: state, status, tick, refresh } = useLive<State>("/api/dashboard/state", initial);
+  // The URL is the truth (`?tab=`): Back into this page can re-show a payload rendered for another tab,
+  // since tab changes only replace the history entry. The local state answers a click at once.
+  const searchParams = useSearchParams();
+  const urlTab = tabFrom(searchParams.get("tab") ?? undefined);
+  const [tab, setTab] = useState<DashboardTab>(urlTab);
+  const [seenUrlTab, setSeenUrlTab] = useState(urlTab);
+  if (urlTab !== seenUrlTab) {
+    setSeenUrlTab(urlTab);
+    setTab(urlTab);
   }
+  const [booking, setBooking] = useState<{ target: BookingTarget | null; open: boolean }>({
+    target: null,
+    open: false,
+  });
+  const [call, setCall] = useState<{ id: string | null; open: boolean }>({ id: null, open: false });
+  const [email, setEmail] = useState<{ id: string | null; open: boolean }>({ id: null, open: false });
+  const [toast, setToast] = useState<Toast | null>(null);
+  const nonce = useRef(0);
+
+  const changeTab = useCallback((next: DashboardTab) => {
+    setTab(next);
+    const url = new URL(window.location.href);
+    if (next === "overview") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", next);
+    window.history.replaceState(null, "", url);
+  }, []);
+
+  const openBooking = useCallback((id: string, action?: ActionKey) => {
+    nonce.current += 1;
+    setCall((c) => ({ ...c, open: false }));
+    setBooking({ target: { id, action, nonce: nonce.current }, open: true });
+  }, []);
+  const openCall = useCallback((id: string) => {
+    setBooking((b) => ({ ...b, open: false }));
+    setCall({ id, open: true });
+  }, []);
+
+  const notify = useCallback((text: string, tone: Toast["tone"]) => {
+    setToast({ id: Date.now(), text, tone });
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 6_000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   return (
-    <div className="space-y-8">
-      {message ? (
-        <p className="rounded-lg border px-3 py-2 text-sm" role="status">
-          {message}
-        </p>
-      ) : null}
-      <section>
-        <h2 className="text-lg font-semibold">Bookings</h2>
-        <div className="mt-3 overflow-x-auto rounded-xl border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted text-left">
-              <tr>
-                <th className="px-3 py-2">Ref</th>
-                <th className="px-3 py-2">Service</th>
-                <th className="px-3 py-2">When</th>
-                <th className="px-3 py-2">Customer</th>
-                <th className="px-3 py-2">Amount</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {data.bookings.map((b) => (
-                <tr key={b.id} className="border-t" data-testid={`booking-${b.ref}`}>
-                  <td className="px-3 py-2 font-mono">
-                    {b.ref}
-                    {b.sample ? <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs">Sample</span> : null}
-                  </td>
-                  <td className="px-3 py-2">{b.serviceName}</td>
-                  <td className="px-3 py-2">{b.appointment}</td>
-                  <td className="px-3 py-2">{b.customerFirstName}</td>
-                  <td className="px-3 py-2">{b.amount}</td>
-                  <td className="px-3 py-2" data-testid="status">
-                    {b.status}
-                    {b.flag ? <span className="ml-1 text-xs text-destructive">({b.flag})</span> : null}
-                  </td>
-                  <td className="px-3 py-2">
-                    {!b.sample && b.status === "authorized" ? (
-                      <div className="flex gap-1">
-                        {ACTIONS.map((a) => (
-                          <Button
-                            key={a.action}
-                            size="xs"
-                            variant="outline"
-                            disabled={busy === b.id}
-                            onClick={() => act(b, a)}
-                          >
-                            {a.label}
-                          </Button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="mx-auto max-w-6xl px-4 pt-8 pb-16 sm:px-6 sm:pt-10">
+      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{state.business.name}</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">Owner view · demo copy {state.business.label}</p>
         </div>
-      </section>
+        <LiveBadge status={status} />
+      </header>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section>
-          <h2 className="text-lg font-semibold">PayPal activity</h2>
-          <ul className="mt-3 space-y-1 rounded-xl border p-3 text-sm">
-            {data.activity.length === 0 ? <li className="text-muted-foreground">Nothing yet.</li> : null}
-            {data.activity.map((a, i) => (
-              <li key={`${a.at}-${i}`} className="flex gap-2">
-                <span className="shrink-0 whitespace-nowrap text-muted-foreground tabular-nums">
-                  {new Date(a.at).toLocaleTimeString()}
-                </span>
-                <span className="font-mono">{a.ref}</span>
-                <span className={a.source === "paypal" ? "text-brand" : ""}>{a.text}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section>
-          <h2 className="text-lg font-semibold">Outbox</h2>
-          <p className="text-sm text-muted-foreground">Emails the system would send. In this demo they stay here.</p>
-          <ul className="mt-3 space-y-1 rounded-xl border p-3 text-sm">
-            {data.outbox.length === 0 ? <li className="text-muted-foreground">No emails yet.</li> : null}
-            {data.outbox.map((m) => (
-              <li key={m.id}>
-                <button
-                  type="button"
-                  className="text-left hover:underline"
-                  onClick={() => setPreview(preview === m.id ? null : m.id)}
-                >
-                  <span className="font-mono">{m.ref}</span> {m.subject}{" "}
-                  <span className="text-muted-foreground">({m.status})</span>
-                </button>
-                {preview === m.id ? (
-                  <iframe
-                    title={m.subject}
-                    // No scripts, no same-origin; links may open a new tab (the pay page runs there).
-                    sandbox="allow-popups allow-popups-to-escape-sandbox"
-                    srcDoc={m.html}
-                    className="mt-2 h-80 w-full rounded border bg-white"
-                  />
+      {status === "gone" ? (
+        <Notice tone="warning" className="mt-6">
+          This demo copy no longer exists.{" "}
+          <Link href="/try" className="font-medium underline underline-offset-4">
+            Start a new one
+          </Link>
+        </Notice>
+      ) : null}
+
+      <Tabs.Root value={tab} onValueChange={(v) => changeTab(v as DashboardTab)} className="mt-6">
+        <div className="-mx-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-4 pb-1 sm:mx-0 sm:px-0">
+          <Tabs.List className="relative inline-flex rounded-full bg-black/[0.06] p-1">
+            {DASHBOARD_TABS.map((t) => (
+              <Tabs.Tab
+                key={t.key}
+                value={t.key}
+                className="relative z-[1] h-8 rounded-full px-4 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none select-none hover:text-foreground focus-visible:ring-4 focus-visible:ring-brand/25 data-active:text-foreground"
+              >
+                {t.label}
+                {t.key === "overview" && state.attention.length > 0 ? (
+                  <span className="ml-1.5 inline-grid size-[18px] place-items-center rounded-full bg-danger text-[11px] font-semibold text-white tabular-nums">
+                    <span className="sr-only">, needs attention: </span>
+                    {state.attention.length}
+                  </span>
                 ) : null}
-              </li>
+              </Tabs.Tab>
             ))}
-          </ul>
-        </section>
+            <Tabs.Indicator className="absolute top-1 left-0 z-0 h-8 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-full bg-card shadow-sm transition-[translate,width] duration-200 ease-out" />
+          </Tabs.List>
+        </div>
+
+        <div className="mt-6">
+          <Tabs.Panel value="overview" className={PANEL}>
+            <Overview state={state} onOpenBooking={openBooking} onSeeAll={() => changeTab("payments")} />
+          </Tabs.Panel>
+          <Tabs.Panel value="bookings" className={PANEL}>
+            <BookingsTab rows={state.bookings} onOpen={(id) => openBooking(id)} />
+          </Tabs.Panel>
+          <Tabs.Panel value="calls" className={PANEL}>
+            <CallsTab calls={state.calls} onOpen={openCall} />
+          </Tabs.Panel>
+          <Tabs.Panel value="payments" className={PANEL}>
+            <PaymentsTab state={state} onOpenBooking={(id) => openBooking(id)} />
+          </Tabs.Panel>
+          <Tabs.Panel value="prices" className={PANEL}>
+            <PriceListTab catalog={state.catalog} />
+          </Tabs.Panel>
+          <Tabs.Panel value="outbox" className={PANEL}>
+            <OutboxTab outbox={state.outbox} onOpen={(id) => setEmail({ id, open: true })} />
+          </Tabs.Panel>
+        </div>
+      </Tabs.Root>
+
+      <BookingSheet
+        target={booking.target}
+        open={booking.open}
+        onOpenChange={(open) => setBooking((b) => ({ ...b, open }))}
+        rows={state.bookings}
+        addons={state.catalog.addons}
+        tick={tick}
+        onNotify={notify}
+        onChanged={() => void refresh()}
+        onOpenCall={openCall}
+      />
+      <CallSheet
+        callId={call.id}
+        open={call.open}
+        onOpenChange={(open) => setCall((c) => ({ ...c, open }))}
+        tick={tick}
+        onOpenBooking={(id) => openBooking(id)}
+      />
+      <EmailSheet emailId={email.id} open={email.open} onOpenChange={(open) => setEmail((m) => ({ ...m, open }))} />
+      <NewActivity latest={state.ledger[0] ?? null} />
+
+      <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[60] flex justify-center px-4" aria-live="polite">
+        {toast ? (
+          <p
+            key={toast.id}
+            role="status"
+            className={cn(
+              "pointer-events-auto flex max-w-md items-start gap-2 rounded-2xl px-4 py-3 text-[15px] shadow-sheet motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300",
+              toast.tone === "danger" ? "bg-danger text-white" : "bg-foreground text-background",
+            )}
+          >
+            {toast.tone === "success" ? (
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[#4ade80]" />
+            ) : toast.tone === "danger" ? (
+              <CircleAlert className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <Info className="mt-0.5 size-4 shrink-0" />
+            )}
+            {toast.text}
+          </p>
+        ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * One visually hidden status line for screen readers: the newest money step, said once when it arrives.
+ * The lists themselves aren't live regions (their "2 min ago" labels change on every poll).
+ */
+function NewActivity({ latest }: { latest: { id: string; text: string } | null }) {
+  const [seen, setSeen] = useState(latest?.id ?? null);
+  const [said, setSaid] = useState("");
+  const id = latest?.id ?? null;
+  if (id !== seen) {
+    setSeen(id);
+    if (latest) setSaid(latest.text);
+  }
+  return (
+    <p className="sr-only" role="status" aria-live="polite">
+      {said}
+    </p>
+  );
+}
+
+function LiveBadge({ status }: { status: LiveStatus }) {
+  const live = status === "live";
+  return (
+    <span
+      className={cn(
+        "inline-flex h-7 items-center gap-2 rounded-full px-3 text-xs font-medium",
+        live ? "bg-success-soft text-success" : "bg-neutral-soft text-muted-foreground",
+      )}
+      title={live ? "Updates every few seconds" : undefined}
+    >
+      <span className="relative flex size-2">
+        {live ? (
+          <span className="absolute inline-flex size-full rounded-full bg-success opacity-60 motion-safe:animate-ping" />
+        ) : null}
+        <span className={cn("relative inline-flex size-2 rounded-full", live ? "bg-success" : "bg-muted-foreground")} />
+      </span>
+      {live ? "Live" : status === "gone" ? "Ended" : "Reconnecting…"}
+    </span>
   );
 }

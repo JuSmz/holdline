@@ -13,16 +13,11 @@ export default async function TryCallPage() {
   const ws = await currentDemoWorkspace();
   if (!ws) redirect("/try");
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-6 py-10">
-      <header>
-        <p className="text-sm font-medium text-brand">Step 1 · Be the customer</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Call {ws.name}</h1>
-      </header>
-      <CallDemo
-        defaults={{ firstName: "Sam", email: "sam@example.com" }}
-        clientId={readVar(process.env, "PAYPAL_CLIENT_ID") ?? null}
-        mocked={payPalMocked()}
-      />
-    </div>
+    <CallDemo
+      businessName={ws.name}
+      defaults={{ firstName: "Sam", email: "sam@example.com" }}
+      clientId={readVar(process.env, "PAYPAL_CLIENT_ID") ?? null}
+      mocked={payPalMocked()}
+    />
   );
 }

@@ -3,7 +3,6 @@ import { GeistSans } from "geist/font/sans";
 import type { Metadata } from "next";
 
 import { SiteFooter } from "@/components/site/site-footer";
-import { SiteHeader } from "@/components/site/site-header";
 
 import "./globals.css";
 
@@ -24,8 +23,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
-        <SiteHeader />
-        <main className="flex-1">{children}</main>
+        {children}
         <SiteFooter />
       </body>
     </html>

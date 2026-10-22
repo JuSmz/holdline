@@ -15,11 +15,12 @@ export function LogoGlyph({ className }: { className?: string }) {
   );
 }
 
-export function Logo({ className }: { className?: string }) {
+/** The glyph and the wordmark; `wordmarkClassName` can hide the word on narrow headers (keep an aria-label). */
+export function Logo({ className, wordmarkClassName }: { className?: string; wordmarkClassName?: string }) {
   return (
     <span className={cn("inline-flex items-center gap-2 font-semibold tracking-tight", className)}>
       <LogoGlyph />
-      <span className="text-lg">holdline</span>
+      <span className={cn("text-lg", wordmarkClassName)}>holdline</span>
     </span>
   );
 }

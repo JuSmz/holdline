@@ -23,15 +23,21 @@ export function workspaceCookieOptions(now = new Date()) {
   };
 }
 
+/** What a delete must repeat: browsers ignore a `__Host-` Set-Cookie without Secure and Path=/. */
+export function workspaceCookieDeletion() {
+  const { httpOnly, secure, sameSite, path } = workspaceCookieOptions();
+  return { name: WORKSPACE_COOKIE, httpOnly, secure, sameSite, path };
+}
+
 export function workspaceIdFromCookie(value: string | undefined): string | null {
   const claims = verify<{ ws?: unknown }>("ws-cookie", value);
   return typeof claims?.ws === "string" ? claims.ws : null;
 }
 
-/** The visitor's demo workspace from the signed cookie, or null (no cookie, forged, expired, or deleted). */
+/** The visitor's demo workspace from the signed cookie, or null (no cookie, forged, expired, deleted or reset). */
 export async function currentDemoWorkspace() {
   const id = workspaceIdFromCookie((await cookies()).get(WORKSPACE_COOKIE)?.value);
   if (!id) return null;
   const [ws] = await getDb().select().from(workspaces).where(eq(workspaces.id, id));
-  return ws && ws.kind === "demo" ? ws : null;
+  return ws && ws.kind === "demo" && !ws.resetAt ? ws : null;
 }

@@ -57,6 +57,13 @@
       "when": 1792631406419,
       "tag": "0007_agent_core",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792701865213,
+      "tag": "0008_workspace_reset",
+      "breakpoints": true
     }
   ]
 }

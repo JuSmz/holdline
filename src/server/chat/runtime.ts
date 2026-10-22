@@ -59,6 +59,13 @@ export type ChatTurnResult =
       stored?: boolean;
     };
 
+/** The demo copy was reset (SPEC §17) while this turn ran: nothing of it is stored. */
+const RESET: ChatTurnResult = {
+  ok: false,
+  reason: "unavailable",
+  message: "This demo was reset. Start a new one to chat again.",
+};
+
 const FALLBACK_REPLY = "Sorry, I didn't quite get that — could you say it another way?";
 const ERROR_REPLY = "Sorry — something went wrong on my side. Could you say that again?";
 
@@ -175,6 +182,7 @@ export async function runChatTurn(
     }
 
     const [ws] = await db.select().from(workspaces).where(eq(workspaces.id, chat.workspaceId));
+    if (ws.resetAt) return RESET;
     const system = `${systemPrompt({
       businessName: ws.name,
       channel: "chat",
@@ -305,7 +313,8 @@ export async function runChatTurn(
       { role: "user", text: userText, at },
       { role: "assistant", text: reply, at },
     ];
-    await appendChat(db, chat.id, { lines, contents: added });
+    // The reset fence: a turn that was still running when the visitor started a fresh demo keeps nothing.
+    if (!(await appendChat(db, chat.id, { lines, contents: added }))) return RESET;
     return failure ? { ...failure, stored: true } : { ok: true, lines, chips: chipsFor(toolResults) };
   } finally {
     // Only our own lease: a turn that outlived it must not free a newer turn's lease.

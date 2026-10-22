@@ -21,7 +21,8 @@ export async function tryApiGuard(request: Request): Promise<{ ws: Workspace } |
   const id = workspaceIdFromCookie(readCookie(request, WORKSPACE_COOKIE));
   if (!id) return deny(401, "no_demo_workspace");
   const [ws] = await getDb().select().from(workspaces).where(eq(workspaces.id, id));
-  if (!ws || ws.kind !== "demo") return deny(401, "no_demo_workspace");
+  // A reset copy is gone for its visitor (SPEC §17): a stale cookie or a request racing the reset.
+  if (!ws || ws.kind !== "demo" || ws.resetAt) return deny(401, "no_demo_workspace");
   return { ws };
 }
 

@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { authorizations, captures, invoices } from "@/db/schema";
 import { conflictMessage } from "@/server/domain/booking-state";
 import { isLateCancellation, policyOf } from "@/server/domain/policy";
-import { type Actor, lockBooking, transitionBooking } from "@/server/domain/transition";
+import { type Actor, type Booking, lockBooking, transitionBooking } from "@/server/domain/transition";
 import { alreadyDoneOutcome, PayPalApiError } from "@/server/paypal/errors";
 import { voidAuthorization } from "@/server/paypal/payments";
 
@@ -146,10 +146,15 @@ export async function cancelBooking(
   ctx: PaymentContext,
   bookingId: string,
   actor: Actor = "owner",
+  /** The status the caller confirmed (e.g. the owner's dialog): anything else is a 409, never a silent fee. */
+  expectStatus?: Booking["status"],
 ): Promise<CancelOutcome> {
   const { db } = ctx;
   const now = ctx.now();
   const b = await getBooking(db, bookingId);
+  if (expectStatus && b.status !== expectStatus) {
+    throw new PaymentStateError("The booking just changed. Check it and try again.", 409, "rule_changed");
+  }
   assertLive(b);
   const policy = policyOf((await getWorkspace(db, b.workspaceId)).policy);
 
