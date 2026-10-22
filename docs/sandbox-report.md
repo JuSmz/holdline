@@ -72,6 +72,26 @@ The first end-to-end run through the product's own services (not the stage-2 lab
 | Extra work                          | invoice `p1-HLYZY3J-X1` $25.00 created and sent (payer view link stored)                     | ✅     |
 | Reconciler confirms the ledger rows | tick report `reconcile_applied: 4` (all four operations matched the domain tables)           | ✅     |
 
+## Stage 7: the agent books and the hold is approved mid-conversation (Render, 2026-10-22, commit `4d8b278`)
+
+Demo copy `#2427` on https://holdline-web.onrender.com/try. Chat model `gemini-3.8-flash` (Gemini Developer API, Tier 1). Voice uses Vapi with `gemini-3.5-flash` and the four real tools, saved through `pnpm vapi:setup`.
+
+| Step                                  | Result                                                                                                                   | Status |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------ |
+| Chat: problem → prices → slots → book | `HL-YQ2TX`, Drain cleaning, Fri Oct 23 08:00–10:00 CT, $149.00 (DB price), hold explained, no "confirmed" before payment | ✅     |
+| Chat: approve in the pay panel        | order → `authorized`. The server posted "Got it — PayPal confirmed the $149 hold…" into the chat by itself               | ✅     |
+| Browser call: safety question, prices | sparking/burning check first; Outlet or switch repair $129, diagnostic $89, both quoted from `get_services`              | ✅     |
+| Browser call: slots → book → approve  | `HL-XMTW9`, Fri Oct 23 10:00–12:00 CT with Luis; the hold was approved during the call                                   | ✅     |
+| Browser call: mid-call confirmation   | the server `say`: "PayPal confirmed the $129 hold. You're all set … Luis will be there."                                 | ✅     |
+| Owner: Job done on `HL-YQ2TX`         | capture $149.00 → `captured`; next tick: technician payout done → `paid_out`                                             | ✅     |
+| Owner: No-show on `HL-XMTW9`          | `no_show` → no-show fee capture → `captured`; next tick: payout done → `paid_out`                                        | ✅     |
+
+Observations for later stages:
+
+- STT renders "22nd/23rd" as "20 second/third" in the transcript. The audio itself was right.
+- The agent accepted a service address in Aachen for an Austin business. Stage 8 should add a prompt line for addresses outside the service area.
+- Dashboard (stage 9): the activity list shows times without dates, and the Amount column shows the booking price even when only the no-show fee was captured.
+
 ## Reauthorization check (on or after 2026-10-26, stage 6)
 
 Run in `/lab/paypal` → "Act on an authorization" with the three holds left open on 2026-10-21. It confirms or corrects the reauthorization model the fake PayPal uses (SPEC §12, stage-6 status).
